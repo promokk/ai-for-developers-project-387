@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.3.0](https://github.com/promokk/ai-for-developers-project-387/compare/v0.2.1...v0.3.0) (2026-11-13)
+
+
+### Features
+
+* добавить проект календаря ([9f8c95b](https://github.com/promokk/ai-for-developers-project-387/commit/9f8c95bb00354fc77fff7896736041744c4ef4e4))
+* добавить проект календаря ([9afcb46](https://github.com/promokk/ai-for-developers-project-387/commit/9afcb469860698c5115c89a15214002af6dc8123)), closes [#2](https://github.com/promokk/ai-for-developers-project-387/issues/2)
+
 ## [0.2.1](https://github.com/promokk/ai-for-developers-project-386/compare/v0.2.0...v0.2.1) (2026-11-11)
 
 ### Bug Fixes
