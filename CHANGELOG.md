@@ -2,7 +2,6 @@
 
 ## [0.3.0](https://github.com/promokk/ai-for-developers-project-387/compare/v0.2.1...v0.3.0) (2026-11-13)
 
-
 ### Features
 
 * добавить проект календаря ([9f8c95b](https://github.com/promokk/ai-for-developers-project-387/commit/9f8c95bb00354fc77fff7896736041744c4ef4e4))
