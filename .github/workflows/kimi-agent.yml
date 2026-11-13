@@ -1,0 +1,160 @@
+name: Kimi Code Issue Agent
+
+on:
+  # Секреты получает только задание ответа после проверки автора; код PR не загружается.
+  # jactionlint ignore=dangerous-triggers
+  issue_comment:
+    types: [created]
+
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    if: >-
+      !github.event.issue.pull_request &&
+      (github.event.comment.author_association == 'OWNER' ||
+      github.event.comment.author_association == 'MEMBER' ||
+      github.event.comment.author_association == 'COLLABORATOR') &&
+      github.event.comment.user.type != 'Bot' &&
+      startsWith(github.event.comment.body, '/agent')
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+    permissions: {}
+    outputs:
+      valid: ${{ steps.command.outputs.valid }}
+    steps:
+      - name: Validate command
+        id: command
+        shell: bash
+        env:
+          COMMENT_BODY: ${{ github.event.comment.body }}
+        run: |
+          request="${COMMENT_BODY#/agent}"
+          if [[ "$request" =~ ^[[:space:]] ]] && [[ "$request" =~ [^[:space:]] ]]; then
+            echo "valid=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "valid=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  respond:
+    needs: validate
+    if: >-
+      needs.validate.outputs.valid == 'true' &&
+      !github.event.issue.pull_request &&
+      (github.event.comment.author_association == 'OWNER' ||
+      github.event.comment.author_association == 'MEMBER' ||
+      github.event.comment.author_association == 'COLLABORATOR') &&
+      github.event.comment.user.type != 'Bot'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Create GitHub App installation token
+        id: app-token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ vars.KIMI_APP_CLIENT_ID }}
+          private-key: ${{ secrets.KIMI_APP_PRIVATE_KEY }}
+          permission-contents: read
+          permission-issues: write
+
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Setup project tools
+        uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
+
+      - name: Install JS dependencies
+        run: mise run install:js
+
+      - name: Check Kimi Code CLI
+        run: mise exec -- pnpm exec kimi --version
+
+      - name: Read issue context
+        shell: bash
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+        run: |
+          gh api "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}" > "$RUNNER_TEMP/issue.json"
+          gh api --paginate --slurp \
+            "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}/comments?per_page=100" \
+            > "$RUNNER_TEMP/comments.json"
+
+      - name: Build prompt
+        shell: bash
+        env:
+          COMMENT_BODY: ${{ github.event.comment.body }}
+        run: |
+          node --input-type=module <<'NODE'
+          import { readFileSync, writeFileSync } from "node:fs";
+
+          const issue = JSON.parse(readFileSync(`${process.env.RUNNER_TEMP}/issue.json`, "utf8"));
+          const commentPages = JSON.parse(readFileSync(`${process.env.RUNNER_TEMP}/comments.json`, "utf8"));
+          const comments = commentPages
+            .flat()
+            .filter((comment) => comment.user.type !== "Bot")
+            .slice(-50)
+            .map((comment) => ({ author: comment.user.login, body: comment.body }));
+          const request = process.env.COMMENT_BODY.replace(/^\/agent\s+/, "");
+          const prompt = [
+            "Ответь на запрос, используя контекст issue и при необходимости файлы репозитория.",
+            `Название issue: ${issue.title}`,
+            `Описание issue:\n${issue.body ?? ""}`,
+            `Предыдущие комментарии в формате JSON:\n${JSON.stringify(comments)}`,
+            `Запрос:\n${request}`,
+          ].join("\n\n");
+          writeFileSync(`${process.env.RUNNER_TEMP}/agent-prompt.txt`, prompt);
+          NODE
+
+      - name: Run Kimi Code
+        shell: bash
+        env:
+          KIMI_CODE_HOME: ${{ runner.temp }}/kimi-code-home
+          KIMI_CODE_NO_AUTO_UPDATE: "1"
+          KIMI_DISABLE_TELEMETRY: "1"
+          KIMI_MODEL_API_KEY: ${{ secrets.KIMI_API_KEY }}
+          KIMI_MODEL_BASE_URL: https://api.kimi.com/coding/v1
+          KIMI_MODEL_NAME: k3.1-pro
+        run: |
+          mise exec -- pnpm exec kimi --agent-file .kimi-code/agents/github-issue-responder.md \
+            --prompt "$(cat "$RUNNER_TEMP/agent-prompt.txt")" \
+            > "$RUNNER_TEMP/agent-response.md"
+          if [[ ! -s "$RUNNER_TEMP/agent-response.md" ]]; then
+            echo "Kimi Code returned an empty response" >&2
+            exit 1
+          fi
+
+      - name: Publish response
+        shell: bash
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+        run: |
+          node --input-type=module <<'NODE'
+          import { readFileSync, writeFileSync } from "node:fs";
+
+          const body = readFileSync(`${process.env.RUNNER_TEMP}/agent-response.md`, "utf8");
+          writeFileSync(`${process.env.RUNNER_TEMP}/agent-comment.json`, JSON.stringify({ body }));
+          NODE
+          gh api --method POST "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}/comments" \
+            --input "$RUNNER_TEMP/agent-comment.json"
+
+      - name: Report failure
+        if: failure() && steps.app-token.outputs.token != ''
+        shell: bash
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+        run: |
+          gh api --method POST "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}/comments" \
+            --raw-field body="Не удалось выполнить запрос Kimi Code. Подробности доступны в [прогоне Actions](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID})."
