@@ -140,6 +140,15 @@ API и собранный SPA из `/app/static`, включая fallback для
   release-please разрешены только `contents: write` и `pull-requests: write`.
 - Dev-серверы слушают только `127.0.0.1`.
 
+## GitHub-агент
+
+- `/agent <запрос>` — команда в новом комментарии issue; запускает read-only
+  Kimi Code после слияния `.github/workflows/kimi-agent.yml` в `main`.
+- `gh issue comment <номер> --body "/agent <запрос>"` — отправить команду через
+  GitHub CLI от имени доверенного участника.
+- `gh run list --workflow kimi-agent.yml` — показать прогоны агента.
+- `gh run view <id> --log` — посмотреть журнал конкретного прогона.
+
 ## Agent skills
 
 ### Issue tracker
