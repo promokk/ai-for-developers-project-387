@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.4.0](https://github.com/promokk/ai-for-developers-project-387/compare/v0.3.0...v0.4.0) (2026-11-13)
+
+### Features
+
+* **ci:** добавить Kimi Code агента в Issues ([3e81fa7](https://github.com/promokk/ai-for-developers-project-387/commit/3e81fa750ab0d9248497f371ad1a4b3e8a78e448))
+
 ## [0.3.0](https://github.com/promokk/ai-for-developers-project-387/compare/v0.2.1...v0.3.0) (2026-11-13)
 
 ### Features
