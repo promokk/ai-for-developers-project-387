@@ -70,6 +70,13 @@ export function acceptanceSuiteForSpec(spec) {
     : { scope: "backend", testDirectory: "backend/tests" };
 }
 
+export function acceptanceScenarioInstruction(spec) {
+  if (spec.body?.includes("booking.eventType.description")) {
+    return "Используй существующие test helpers и валидные booking window, даты и часовой пояс из текущих сценариев. Все новые сценарии должны доходить до страницы. Controlled red даёт основной сценарий с заполненным описанием: он падает именно на ожидаемом assertion отсутствующего описания. Негативный сценарий с description null и соседние сценарии проверяют уже корректное поведение и не должны быть искусственно красными. Ошибки setup или API 422, включая START_OUTSIDE_BOOKING_WINDOW и INVALID_DATETIME, не засчитываются как controlled red.";
+  }
+  return "Используй существующие test helpers и валидные fixtures текущего suite. Новые сценарии нового поведения должны доходить до целевого результата и падать на ожидаемых assertions. Негативные и соседние сценарии уже корректного поведения не должны быть искусственно красными. Ошибки setup или API validation не засчитываются как controlled red.";
+}
+
 export function validateTestOnlyPaths(paths, scope) {
   const directory = scope === "frontend" ? "frontend/tests/" : "backend/tests/";
   if (paths.length === 0) {
@@ -239,8 +246,7 @@ function context() {
         ? [
             "Фаза 1 из 2: добавь ТОЛЬКО приёмочные тесты спецификации, не меняй реализацию.",
             `Разрешены изменения только в ${suite.testDirectory}. Новые тесты должны воспроизводить основной и требуемые негативный/соседний сценарии и сейчас завершаться ошибкой.`,
-            "Используй существующие test helpers и валидные booking window, даты и часовой пояс из текущих сценариев. Не создавай собственные несовместимые fixtures.",
-            "Каждый новый сценарий должен дойти до страницы и упасть именно на ожидаемом assertion отсутствующего описания. Ошибки setup или API 422, включая START_OUTSIDE_BOOKING_WINDOW и INVALID_DATETIME, не засчитываются как controlled red.",
+            acceptanceScenarioInstruction(spec),
             "Не делай тесты зелёными через реализацию или ослабление утверждений. Workflow сам запустит suite, потребует nonzero, закоммитит тесты и создаст draft PR.",
           ]
         : [
