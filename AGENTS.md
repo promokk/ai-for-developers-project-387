@@ -47,6 +47,7 @@ API и собранный SPA из `/app/static`, включая fallback для
 - `mise run fix` — безопасные автофиксы линтеров и форматтеров.
 - `mise run test` — тесты бэкенда (pytest).
 - `mise run test:frontend` — браузерные тесты фронтенда (Playwright).
+- `mise run test:github` — тесты проверяемых действий GitHub-агентов.
 - `CALENDAR_BASE_URL=<URL> mise run test:external` — внешние HTTP- и
   браузерные сценарии против уже запущенного приложения, без dev-серверов.
 - `mise run build` — сборка фронтенда (vite build).
@@ -142,8 +143,10 @@ API и собранный SPA из `/app/static`, включая fallback для
 
 ## GitHub-агент
 
-- `/agent <запрос>` — команда в новом комментарии issue; запускает read-only
-  Kimi Code после слияния `.github/workflows/kimi-agent.yml` в `main`.
+- `/agent <запрос>` — команда в новом комментарии issue; запускает Kimi Code
+  после слияния `.github/workflows/kimi-agent.yml` в `main`. Код остаётся
+  read-only; по явному запросу workflow может создавать Issues, связывать
+  дочерние задачи и менять разрешённые метки triage.
 - `gh issue comment <номер> --body "/agent <запрос>"` — отправить команду через
   GitHub CLI от имени доверенного участника.
 - `gh run list --workflow kimi-agent.yml` — показать прогоны агента.
