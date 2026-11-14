@@ -30,13 +30,32 @@ jobs:
       head-sha: ${{ steps.signal.outputs.headSha }}
       base-sha: ${{ steps.signal.outputs.baseSha }}
     steps:
+      - name: Check for an unprivileged fork signal
+        id: artifact
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_RUN_ID: ${{ github.event.workflow_run.id }}
+        run: |
+          artifact_name="kimi-pr-review-fork-$SOURCE_RUN_ID"
+          count=$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${SOURCE_RUN_ID}/artifacts" \
+            --jq ".artifacts | map(select(.name == \"$artifact_name\")) | length")
+          if [[ "$count" == "0" ]]; then
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "Fork-signal отсутствует: same-repo, draft или неподдерживаемый исходный run пропускается."
+          else
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Checkout trusted workflow scripts
+        if: steps.artifact.outputs.present == 'true'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 1
           persist-credentials: false
 
       - name: Download unprivileged fork signal
+        if: steps.artifact.outputs.present == 'true'
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -47,6 +66,7 @@ jobs:
             --dir "$RUNNER_TEMP"
 
       - name: Verify current fork PR head
+        if: steps.artifact.outputs.present == 'true'
         id: signal
         shell: bash
         env:

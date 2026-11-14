@@ -48,6 +48,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
+      actions: read
       contents: read
       id-token: write
     steps:
@@ -244,7 +245,7 @@ jobs:
         if: needs.validate.outputs.mode == 'implement-spec'
         shell: bash
         env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          GH_TOKEN: ${{ github.token }}
           RED_COMMIT: ${{ steps.red-commit.outputs.sha }}
         run: |
           run_id=""
@@ -314,6 +315,29 @@ jobs:
             exit 1
           fi
           git diff --check
+
+      - name: Require acceptance tests unchanged since RED_COMMIT
+        if: needs.validate.outputs.mode == 'implement-spec'
+        shell: bash
+        env:
+          RED_COMMIT: ${{ steps.red-commit.outputs.sha }}
+          TEST_SCOPE: ${{ steps.implementation-context.outputs.testScope }}
+        run: |
+          if [[ "$TEST_SCOPE" == "frontend" ]]; then
+            test_dir=frontend/tests
+          else
+            test_dir=backend/tests
+          fi
+          untracked=$(git ls-files --others --exclude-standard -- "$test_dir")
+          if [[ -n "$untracked" ]]; then
+            echo "Acceptance test tree has new files after RED_COMMIT $RED_COMMIT: $untracked" >&2
+            exit 1
+          fi
+          if ! git diff --exit-code "$RED_COMMIT" -- "$test_dir"; then
+            echo "Acceptance tests must remain byte-identical to RED_COMMIT $RED_COMMIT during implementation" >&2
+            exit 1
+          fi
+          echo "Acceptance test tree $test_dir is unchanged since RED_COMMIT $RED_COMMIT."
 
       - name: Run full project checks after implementation
         if: needs.validate.outputs.mode == 'implement-spec'
