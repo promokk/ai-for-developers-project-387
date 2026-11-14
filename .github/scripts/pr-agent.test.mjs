@@ -105,9 +105,10 @@ test("спецификация #15 выбирает frontend acceptance suite", 
 });
 
 test("acceptance prompt для #15 требует red только у нового основного поведения", () => {
-  const instruction = acceptanceScenarioInstruction({
-    body: "Использовать booking.eventType.description; при null описание отсутствует.",
-  });
+  const instruction = acceptanceScenarioInstruction(
+    { body: "Использовать booking.eventType.description; при null описание отсутствует." },
+    "frontend",
+  );
   assert.match(instruction, /основной сценарий с заполненным описанием/);
   assert.match(instruction, /description null/);
   assert.match(instruction, /не должны быть искусственно красными/);
@@ -115,7 +116,10 @@ test("acceptance prompt для #15 требует red только у новог
 });
 
 test("acceptance prompt не переносит требования страницы на backend suite", () => {
-  const instruction = acceptanceScenarioInstruction({ body: "Добавить backend/tests/test_bookings.py" });
+  const instruction = acceptanceScenarioInstruction(
+    { body: "Добавить backend/tests/test_bookings.py для booking.eventType.description" },
+    "backend",
+  );
   assert.match(instruction, /ожидаемых assertions/);
   assert.doesNotMatch(instruction, /до страницы|отсутствующего описания/);
 });

@@ -144,6 +144,16 @@ jobs:
             echo "Acceptance tests are unexpectedly green before implementation" >&2
             exit 1
           fi
+          if [[ "$TEST_SCOPE" == "frontend" ]]; then
+            if grep -E "START_OUTSIDE_BOOKING_WINDOW|INVALID_DATETIME|API 422" "$RUNNER_TEMP/acceptance-red.log"; then
+              echo "Controlled red rejected: acceptance fixtures failed before the expected assertion" >&2
+              exit 1
+            fi
+            if ! grep -E "expect\\(|AssertionError" "$RUNNER_TEMP/acceptance-red.log"; then
+              echo "Controlled red rejected: no browser assertion failure was found" >&2
+              exit 1
+            fi
+          fi
           echo "Expected red confirmed: acceptance command exited with $status before implementation."
 
       - name: Run full project checks for existing PR
