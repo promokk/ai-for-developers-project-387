@@ -19,23 +19,11 @@ jobs:
       github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    concurrency:
-      group: kimi-pr-review-${{ github.event.pull_request.number }}
-      cancel-in-progress: true
     permissions:
       contents: read
-      id-token: write
+      issues: write
+      pull-requests: write
     steps:
-      - name: Create read-only reviewer token
-        id: app-token
-        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
-        with:
-          client-id: ${{ vars.KIMI_APP_CLIENT_ID }}
-          private-key: ${{ secrets.KIMI_APP_PRIVATE_KEY }}
-          permission-contents: read
-          permission-issues: write
-          permission-pull-requests: write
-
       - name: Checkout trusted base revision
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -43,11 +31,22 @@ jobs:
           fetch-depth: 1
           persist-credentials: false
 
+      - name: Check reviewer availability in trusted base
+        id: runtime
+        run: |
+          if [[ -f .github/scripts/pr-review.mjs && -f .kimi-code/agents/github-pr-reviewer.md && -f REVIEW.md ]]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "Авторевью станет доступно после попадания этого контура в base-ветку; модель не вызывается."
+          fi
+
       - name: Reserve one of five reviews before model call
+        if: steps.runtime.outputs.available == 'true'
         id: budget
         shell: bash
         env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          GH_TOKEN: ${{ github.token }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: node .github/scripts/pr-review.mjs reserve
@@ -57,7 +56,7 @@ jobs:
         id: current-head
         shell: bash
         env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          GH_TOKEN: ${{ github.token }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: node .github/scripts/pr-review.mjs check-head
@@ -74,7 +73,7 @@ jobs:
         if: steps.current-head.outputs.allowed == 'true'
         shell: bash
         env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          GH_TOKEN: ${{ github.token }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: node .github/scripts/pr-review.mjs context
@@ -102,7 +101,7 @@ jobs:
         if: steps.current-head.outputs.allowed == 'true'
         shell: bash
         env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           gh api --method POST "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}/reviews" \
@@ -110,10 +109,10 @@ jobs:
             --raw-field body="$(cat "$RUNNER_TEMP/review-response.md")"
 
       - name: Report review failure
-        if: failure() && steps.app-token.outputs.token != ''
+        if: failure()
         shell: bash
         env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           gh api --method POST "repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/comments" \

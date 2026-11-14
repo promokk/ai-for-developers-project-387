@@ -64,18 +64,9 @@ jobs:
       cancel-in-progress: true
     permissions:
       contents: read
-      id-token: write
+      issues: write
+      pull-requests: write
     steps:
-      - name: Create review-only token without code write
-        id: app-token
-        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
-        with:
-          client-id: ${{ vars.KIMI_APP_CLIENT_ID }}
-          private-key: ${{ secrets.KIMI_APP_PRIVATE_KEY }}
-          permission-contents: read
-          permission-issues: write
-          permission-pull-requests: write
-
       - name: Checkout trusted base revision only
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -87,7 +78,7 @@ jobs:
         id: budget
         shell: bash
         env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          GH_TOKEN: ${{ github.token }}
           HEAD_SHA: ${{ needs.prepare.outputs.head-sha }}
           PR_NUMBER: ${{ needs.prepare.outputs.pr-number }}
         run: node .github/scripts/pr-review.mjs reserve
@@ -97,7 +88,7 @@ jobs:
         id: current-head
         shell: bash
         env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          GH_TOKEN: ${{ github.token }}
           HEAD_SHA: ${{ needs.prepare.outputs.head-sha }}
           PR_NUMBER: ${{ needs.prepare.outputs.pr-number }}
         run: node .github/scripts/pr-review.mjs check-head
@@ -114,7 +105,7 @@ jobs:
         if: steps.current-head.outputs.allowed == 'true'
         shell: bash
         env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          GH_TOKEN: ${{ github.token }}
           HEAD_SHA: ${{ needs.prepare.outputs.head-sha }}
           PR_NUMBER: ${{ needs.prepare.outputs.pr-number }}
         run: node .github/scripts/pr-review.mjs context
@@ -142,7 +133,7 @@ jobs:
         if: steps.current-head.outputs.allowed == 'true'
         shell: bash
         env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ needs.prepare.outputs.pr-number }}
         run: |
           gh api --method POST "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}/reviews" \
@@ -150,10 +141,10 @@ jobs:
             --raw-field body="$(cat "$RUNNER_TEMP/review-response.md")"
 
       - name: Report review failure
-        if: failure() && steps.app-token.outputs.token != ''
+        if: failure()
         shell: bash
         env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ needs.prepare.outputs.pr-number }}
         run: |
           gh api --method POST "repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/comments" \
