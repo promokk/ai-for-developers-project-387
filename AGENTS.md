@@ -157,7 +157,9 @@ API и собранный SPA из `/app/static`, включая fallback для
 - `/agent implement-spec` в обычном Issue запускает тот же privileged writer:
   одна дочерняя спецификация (либо сам Issue), новая ветка от `origin/main`.
   Фаза 1 добавляет только приёмочные тесты, требует реальный red тест и red CI,
-  создаёт test commit и draft PR. Фаза 2 отдельным вызовом реализует спецификацию,
+  создаёт test commit и draft PR. Только её controlled-red push использует
+  `git push --no-verify`, потому что hk pre-push обязан быть красным; green push и
+  обычные PR fixes выполняются с hooks. Фаза 2 отдельным вызовом реализует спецификацию,
   требует полный зелёный `mise run check`, создаёт feature commit в той же ветке
   и переводит тот же PR в ready for review. Второй PR не создаётся; прямое
   изменение `main` и merge запрещены.

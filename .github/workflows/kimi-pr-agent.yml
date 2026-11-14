@@ -219,7 +219,9 @@ jobs:
         if: needs.validate.outputs.mode == 'implement-spec'
         env:
           ISSUE_NUMBER: ${{ needs.validate.outputs.number }}
-        run: git push --set-upstream origin "agent/issue-${ISSUE_NUMBER}-${GITHUB_RUN_ID}"
+        run: |
+          # Controlled red осознанно обходит hk pre-push: полный check здесь обязан быть красным до реализации.
+          git push --no-verify --set-upstream origin "agent/issue-${ISSUE_NUMBER}-${GITHUB_RUN_ID}"
 
       - name: Create draft PR for red acceptance commit
         if: needs.validate.outputs.mode == 'implement-spec'
