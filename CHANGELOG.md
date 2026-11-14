@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.0](https://github.com/promokk/ai-for-developers-project-387/compare/v0.5.0...v0.6.0) (2026-11-14)
+
+
+### Features
+
+* **ci:** добавить автотриаж новых issues ([d718820](https://github.com/promokk/ai-for-developers-project-387/commit/d718820117699fe12a2312147e1de53b76d64682))
+
 ## [0.5.0](https://github.com/promokk/ai-for-developers-project-387/compare/v0.4.0...v0.5.0) (2026-11-14)
 
 ### Features
