@@ -1,0 +1,134 @@
+name: Issue Auto Triage
+
+on:
+  issues:
+    types: [opened]
+  workflow_dispatch:
+    inputs:
+      issue_number:
+        description: Номер issue для повторного первичного триажа
+        required: true
+        type: number
+
+permissions: {}
+
+concurrency:
+  group: issue-triage-${{ github.event.issue.number || inputs.issue_number }}
+  cancel-in-progress: false
+
+jobs:
+  triage:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'issues' &&
+      github.event.action == 'opened' &&
+      github.event.sender.type != 'Bot')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Create GitHub App installation token
+        id: app-token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ vars.KIMI_APP_CLIENT_ID }}
+          private-key: ${{ secrets.KIMI_APP_PRIVATE_KEY }}
+          permission-contents: read
+          permission-issues: write
+
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Read issue
+        shell: bash
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          ISSUE_NUMBER: ${{ github.event.issue.number || inputs.issue_number }}
+        run: |
+          gh api "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}" > "$RUNNER_TEMP/issue.json"
+
+      - name: Filter issue
+        id: filter
+        run: node .github/scripts/issue-triage.mjs filter
+
+      - name: Setup project tools
+        if: steps.filter.outputs.skip != 'true'
+        uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
+
+      - name: Install JS dependencies
+        if: steps.filter.outputs.skip != 'true'
+        run: mise run install:js
+
+      - name: Check Kimi Code CLI
+        if: steps.filter.outputs.skip != 'true'
+        run: mise exec -- pnpm exec kimi --version
+
+      - name: Build prompt
+        if: steps.filter.outputs.skip != 'true'
+        run: node .github/scripts/issue-triage.mjs prompt
+
+      - name: Run Kimi Code
+        if: steps.filter.outputs.skip != 'true'
+        shell: bash
+        env:
+          KIMI_CODE_HOME: ${{ runner.temp }}/kimi-code-home
+          KIMI_CODE_NO_AUTO_UPDATE: "1"
+          KIMI_DISABLE_TELEMETRY: "1"
+          KIMI_MODEL_API_KEY: ${{ secrets.KIMI_API_KEY }}
+          KIMI_MODEL_BASE_URL: https://api.kimi.com/coding/v1
+          KIMI_MODEL_NAME: k3.1-pro
+        run: |
+          mise exec -- pnpm exec kimi --agent-file .kimi-code/agents/github-issue-triage.md \
+            --prompt "$(cat "$RUNNER_TEMP/agent-prompt.txt")" \
+            > "$RUNNER_TEMP/agent-response.json"
+          if [[ ! -s "$RUNNER_TEMP/agent-response.json" ]]; then
+            echo "Kimi Code returned an empty response" >&2
+            exit 1
+          fi
+
+      - name: Validate triage result
+        if: steps.filter.outputs.skip != 'true'
+        id: validation
+        env:
+          INITIAL_CATEGORY: ${{ steps.filter.outputs.category }}
+        run: node .github/scripts/issue-triage.mjs validate
+
+      - name: Recheck issue labels
+        if: steps.filter.outputs.skip != 'true'
+        id: recheck
+        shell: bash
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          INITIAL_CATEGORY: ${{ steps.filter.outputs.category }}
+          ISSUE_NUMBER: ${{ github.event.issue.number || inputs.issue_number }}
+        run: |
+          gh api "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}" > "$RUNNER_TEMP/current-issue.json"
+          node .github/scripts/issue-triage.mjs recheck
+
+      - name: Apply triage result
+        if: steps.recheck.outputs.proceed == 'true'
+        shell: bash
+        env:
+          CATEGORY: ${{ steps.validation.outputs.category }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          INITIAL_CATEGORY: ${{ steps.filter.outputs.category }}
+          ISSUE_NUMBER: ${{ github.event.issue.number || inputs.issue_number }}
+          STATE: ${{ steps.validation.outputs.state }}
+        run: |
+          gh api --method POST "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}/labels" \
+            --input "$RUNNER_TEMP/triage-labels.json"
+          if ! gh api --method POST "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}/comments" \
+            --input "$RUNNER_TEMP/triage-comment.json"; then
+            gh api --method DELETE \
+              "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}/labels/${STATE}"
+            if [[ -z "$INITIAL_CATEGORY" ]]; then
+              gh api --method DELETE \
+                "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}/labels/${CATEGORY}"
+            fi
+            exit 1
+          fi

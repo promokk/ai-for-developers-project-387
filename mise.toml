@@ -120,6 +120,10 @@ description = "pytest: тесты бэкенда"
 dir = "backend"
 run = "uv run pytest"
 
+[tasks."test:ci"]
+description = "Node: тесты фильтров и валидации автотриажа issues"
+run = "node --test .github/scripts/issue-triage.test.mjs"
+
 [tasks."test:frontend"]
 description = "Playwright: браузерные тесты фронтенда"
 dir = "frontend"
@@ -144,6 +148,7 @@ run = [
   { task = "typecheck:js" },
   { task = "lint:openapi" },
   { task = "lint:ci" },
+  { task = "test:ci" },
   { task = "lint:secrets" },
   { task = "lint:md" },
   { task = "lint:typos" },
