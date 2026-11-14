@@ -84,6 +84,12 @@ test("корректный ответ needs-triage нормализуется", 
   assert.deepEqual(parsed.questions, []);
 });
 
+test("принимается JSON с префиксом Kimi CLI", () => {
+  const parsed = parseTriageResponse(`• ${JSON.stringify(result())}`);
+  assert.equal(parsed.category, "bug");
+  assert.equal(parsed.state, "needs-triage");
+});
+
 test("корректный ответ needs-info содержит вопросы", () => {
   const parsed = parseTriageResponse(
     JSON.stringify(

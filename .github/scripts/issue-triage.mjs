@@ -69,7 +69,7 @@ function assertResultShape(result) {
 export function parseTriageResponse(raw, initialCategory = null) {
   let result;
   try {
-    result = JSON.parse(raw.trim());
+    result = JSON.parse(raw.trim().replace(/^•\s*/, ""));
   } catch {
     throw new Error("Ответ Kimi должен быть одним JSON-объектом без Markdown");
   }
