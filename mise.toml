@@ -115,6 +115,10 @@ description = "Генерируемые файлы свежие (OpenAPI, SDK)"
 depends = ["gen"]
 run = "git diff --exit-code contracts/openapi frontend/src/api"
 
+[tasks."test:github"]
+description = "Тесты проверяемых действий GitHub-агентов"
+run = "node --test .github/scripts/*.test.mjs"
+
 [tasks.test]
 description = "pytest: тесты бэкенда"
 dir = "backend"
@@ -153,6 +157,7 @@ run = [
   { task = "lint:md" },
   { task = "lint:typos" },
   { task = "check:generated" },
+  { task = "test:github" },
   { task = "test" },
   { task = "test:frontend" },
   { task = "build" },
