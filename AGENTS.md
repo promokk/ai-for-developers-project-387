@@ -145,14 +145,30 @@ API и собранный SPA из `/app/static`, включая fallback для
 
 ## GitHub-агент
 
-- `/agent <запрос>` — команда в новом комментарии issue; запускает Kimi Code
-  после слияния `.github/workflows/kimi-agent.yml` в `main`. Код остаётся
-  read-only; по явному запросу workflow может создавать Issues, связывать
-  дочерние задачи и менять разрешённые метки triage.
+- `/agent <запрос>` — команда в новом комментарии обычного Issue; запускает
+  read-only Kimi Code после слияния `.github/workflows/kimi-agent.yml` в `main`.
+  По явному запросу workflow может создавать Issues, связывать дочерние задачи и
+  менять разрешённые метки triage. Команда `/agent implement-spec` в этом
+  workflow не выполняется.
+- `/agent <запрос>` в комментарии PR или review comment запускает
+  `.github/workflows/kimi-pr-agent.yml`: только доверенные не-боты и same-repo PR,
+  checkout точного head, проверки и push исправлений в ту же ветку. Активная
+  запись не отменяется новой командой.
+- `/agent implement-spec` в обычном Issue запускает тот же privileged writer:
+  одна дочерняя спецификация (либо сам Issue), новая ветка от `origin/main`,
+  реализация, тесты и PR. Прямое изменение `main` и merge запрещены.
+- `.github/workflows/pr-review.yml` выполняет независимое read-only ревью
+  не-draft PR по `REVIEW.md` и связанной спецификации. Бюджет — ровно пять
+  резервирований на PR без сброса новым head; отказ публикуется без вызова
+  модели. Fork PR продолжаются через `pr-review-fork.yml` без checkout кода fork.
+- `pr-browser.yml` запускается вручную с номером PR и полным ожидаемым head SHA.
+  Он проверяет точное совпадение, выполняет Playwright и публикует artifact
+  с HTML report, screenshots и metadata. Railway не является доказательством PR.
 - `gh issue comment <номер> --body "/agent <запрос>"` — отправить команду через
   GitHub CLI от имени доверенного участника.
 - `gh run list --workflow kimi-agent.yml` — показать прогоны агента.
 - `gh run view <id> --log` — посмотреть журнал конкретного прогона.
+- Merge любых созданных агентом PR выполняет только человек после ревью.
 - Новые issues автоматически обрабатывает `.github/workflows/issue-triage.yml`
   после слияния в `main`. Он присваивает только категорию и `needs-triage` или
   `needs-info`; issues с любой меткой состояния пропускаются без комментариев.
