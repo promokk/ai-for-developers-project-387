@@ -89,17 +89,18 @@ jobs:
       - name: Install JS dependencies
         run: mise run install:js
 
-      - name: Build trusted command context
+      - name: Build acceptance-test or existing-PR context
         id: context
         shell: bash
         env:
           AGENT_MODE: ${{ needs.validate.outputs.mode }}
+          AGENT_PHASE: ${{ needs.validate.outputs.mode == 'implement-spec' && 'acceptance' || 'pr' }}
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           HEAD_SHA: ${{ needs.validate.outputs.head-sha }}
           TARGET_NUMBER: ${{ needs.validate.outputs.number }}
         run: node .github/scripts/pr-agent.mjs context
 
-      - name: Run privileged Kimi writer
+      - name: Run phase 1 acceptance writer or existing-PR writer
         shell: bash
         env:
           KIMI_CODE_HOME: ${{ runner.temp }}/kimi-code-home
@@ -117,10 +118,39 @@ jobs:
             exit 1
           fi
 
-      - name: Run full project checks
+      - name: Allow only acceptance-test files in phase 1
+        if: needs.validate.outputs.mode == 'implement-spec'
+        env:
+          TEST_SCOPE: ${{ steps.context.outputs.testScope }}
+        run: node .github/scripts/pr-agent.mjs assert-test-only
+
+      - name: Require real nonzero acceptance test before implementation
+        if: needs.validate.outputs.mode == 'implement-spec'
+        shell: bash
+        env:
+          TEST_SCOPE: ${{ steps.context.outputs.testScope }}
+        run: |
+          set +e
+          if [[ "$TEST_SCOPE" == "frontend" ]]; then
+            mise run test:frontend > "$RUNNER_TEMP/acceptance-red.log" 2>&1
+          else
+            mise run test > "$RUNNER_TEMP/acceptance-red.log" 2>&1
+          fi
+          status=$?
+          set -e
+          cat "$RUNNER_TEMP/acceptance-red.log"
+          if [[ $status -eq 0 ]]; then
+            echo "Acceptance tests are unexpectedly green before implementation" >&2
+            exit 1
+          fi
+          echo "Expected red confirmed: acceptance command exited with $status before implementation."
+
+      - name: Run full project checks for existing PR
+        if: needs.validate.outputs.mode == 'pr'
         run: mise run check
 
-      - name: Reject protected or empty changes
+      - name: Reject protected or empty changes in existing PR
+        if: needs.validate.outputs.mode == 'pr'
         shell: bash
         run: |
           if [[ -z "$(git status --porcelain)" ]]; then
@@ -147,79 +177,183 @@ jobs:
             exit 1
           fi
 
-      - name: Commit verified changes
+      - name: Commit verified existing-PR changes
+        if: needs.validate.outputs.mode == 'pr'
         shell: bash
         env:
-          AGENT_MODE: ${{ needs.validate.outputs.mode }}
           TARGET_NUMBER: ${{ needs.validate.outputs.number }}
         run: |
           git config user.name "kimi-code[bot]"
           git config user.email "kimi-code[bot]@users.noreply.github.com"
           git add -A
           git diff --cached --check
-          if [[ "$AGENT_MODE" == "implement-spec" ]]; then
-            git commit -m "feat: реализовать спецификацию Issue #${TARGET_NUMBER}"
-          else
-            git commit -m "fix: применить проверенный запрос из PR #${TARGET_NUMBER}"
-          fi
+          git commit -m "fix: применить проверенный запрос из PR #${TARGET_NUMBER}"
 
-      - name: Push fix to the same PR branch
+      - name: Push fix to the same existing PR branch
         if: needs.validate.outputs.mode == 'pr'
         env:
           HEAD_REF: ${{ needs.validate.outputs.head-ref }}
         run: git push origin "HEAD:${HEAD_REF}"
 
-      - name: Push implementation branch
+      - name: Commit only red acceptance tests
+        if: needs.validate.outputs.mode == 'implement-spec'
+        id: red-commit
+        shell: bash
+        env:
+          SPEC_NUMBER: ${{ steps.context.outputs.specNumber }}
+          TEST_SCOPE: ${{ steps.context.outputs.testScope }}
+        run: |
+          git config user.name "kimi-code[bot]"
+          git config user.email "kimi-code[bot]@users.noreply.github.com"
+          if [[ "$TEST_SCOPE" == "frontend" ]]; then
+            git add -A -- frontend/tests
+          else
+            git add -A -- backend/tests
+          fi
+          git diff --cached --check
+          git commit -m "test: добавить приёмочные тесты спецификации #${SPEC_NUMBER}"
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Push red tests to new implementation branch
         if: needs.validate.outputs.mode == 'implement-spec'
         env:
           ISSUE_NUMBER: ${{ needs.validate.outputs.number }}
         run: git push --set-upstream origin "agent/issue-${ISSUE_NUMBER}-${GITHUB_RUN_ID}"
 
-      - name: Create implementation PR
+      - name: Create draft PR for red acceptance commit
         if: needs.validate.outputs.mode == 'implement-spec'
         id: create-pr
         shell: bash
         env:
+          BODY_PHASE: acceptance
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           ISSUE_NUMBER: ${{ needs.validate.outputs.number }}
+          RED_COMMIT: ${{ steps.red-commit.outputs.sha }}
           SPEC_NUMBER: ${{ steps.context.outputs.specNumber }}
         run: |
-          node --input-type=module <<'NODE'
-          import { readFileSync, writeFileSync } from "node:fs";
-          const response = readFileSync(`${process.env.RUNNER_TEMP}/agent-response.md`, "utf8");
-          const run = `${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}`;
-          const body = [
-            "## Summary",
-            "",
-            response,
-            "",
-            "## Связанные Issue и спецификация",
-            "",
-            `- Closes #${process.env.SPEC_NUMBER}. Источник команды: #${process.env.ISSUE_NUMBER}.`,
-            `- Человеческое согласование: команда \`/agent implement-spec\` доверенного участника и готовая спецификация.`,
-            "",
-            "## Evidence",
-            "",
-            `- **Before:** сценарий спецификации не был реализован.\n  **After:** \`mise run check\` пройден в [прогоне Actions](${run}).`,
-            "- Глубина проверок: основной, негативный и соседний сценарии спецификации; подробности в итоге агента выше.",
-            "",
-            "## Merge Danger",
-            "",
-            "**Door:** two-way.",
-            "",
-            "**Blast Radius:** изменения ограничены связанной спецификацией.",
-            "",
-            "**Риск:** автоматические проверки не заменяют ревью; merge выполняет человек.",
-            "",
-            "**Rollback:** revert коммита этого PR после ревью.",
-          ].join("\n");
-          writeFileSync(`${process.env.RUNNER_TEMP}/agent-pr-body.md`, body);
-          NODE
-          gh pr create --base main --head "agent/issue-${ISSUE_NUMBER}-${GITHUB_RUN_ID}" \
+          node .github/scripts/pr-agent.mjs pr-body
+          gh pr create --draft --base main --head "agent/issue-${ISSUE_NUMBER}-${GITHUB_RUN_ID}" \
             --title "Реализация спецификации #${SPEC_NUMBER}" \
             --body-file "$RUNNER_TEMP/agent-pr-body.md" \
             > "$RUNNER_TEMP/pr-url.txt"
-          cat "$RUNNER_TEMP/pr-url.txt"
+          pr_url=$(cat "$RUNNER_TEMP/pr-url.txt")
+          echo "$pr_url"
+          echo "number=$(gh pr view "$pr_url" --json number --jq .number)" >> "$GITHUB_OUTPUT"
+
+      - name: Wait for real red CI on draft PR
+        if: needs.validate.outputs.mode == 'implement-spec'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          RED_COMMIT: ${{ steps.red-commit.outputs.sha }}
+        run: |
+          run_id=""
+          for _ in {1..30}; do
+            run_id=$(gh run list --commit "$RED_COMMIT" --workflow check.yml --event pull_request \
+              --limit 1 --json databaseId --jq '.[0].databaseId // empty')
+            if [[ -n "$run_id" ]]; then
+              break
+            fi
+            sleep 5
+          done
+          if [[ -z "$run_id" ]]; then
+            echo "Red CI run was not created for $RED_COMMIT" >&2
+            exit 1
+          fi
+          set +e
+          gh run watch "$run_id" --interval 10 --exit-status
+          set -e
+          conclusion=$(gh run view "$run_id" --json conclusion --jq .conclusion)
+          if [[ "$conclusion" != "failure" ]]; then
+            echo "Red CI unexpectedly concluded $conclusion instead of failure" >&2
+            exit 1
+          fi
+          gh run view "$run_id" --json url --jq .url > "$RUNNER_TEMP/red-ci-url.txt"
+          echo "Expected red CI confirmed in run $run_id for $RED_COMMIT."
+
+      - name: Build phase 2 implementation context
+        if: needs.validate.outputs.mode == 'implement-spec'
+        id: implementation-context
+        shell: bash
+        env:
+          AGENT_MODE: implement-spec
+          AGENT_PHASE: implementation
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          TARGET_NUMBER: ${{ needs.validate.outputs.number }}
+        run: node .github/scripts/pr-agent.mjs context
+
+      - name: Run separate phase 2 implementation writer
+        if: needs.validate.outputs.mode == 'implement-spec'
+        shell: bash
+        env:
+          KIMI_CODE_HOME: ${{ runner.temp }}/kimi-code-implementation-home
+          KIMI_CODE_NO_AUTO_UPDATE: "1"
+          KIMI_DISABLE_TELEMETRY: "1"
+          KIMI_MODEL_API_KEY: ${{ secrets.KIMI_API_KEY }}
+          KIMI_MODEL_BASE_URL: https://api.kimi.com/coding/v1
+          KIMI_MODEL_NAME: k3.1-pro
+        run: |
+          mise exec -- pnpm exec kimi --agent-file .kimi-code/agents/github-pr-writer.md \
+            --prompt "$(cat "$RUNNER_TEMP/agent-prompt.txt")" \
+            > "$RUNNER_TEMP/agent-response.md"
+          if [[ ! -s "$RUNNER_TEMP/agent-response.md" ]]; then
+            echo "Kimi Code returned an empty implementation response" >&2
+            exit 1
+          fi
+
+      - name: Reject protected or empty implementation changes
+        if: needs.validate.outputs.mode == 'implement-spec'
+        shell: bash
+        run: |
+          if [[ -z "$(git status --porcelain)" ]]; then
+            echo "Implementation agent made no changes" >&2
+            exit 1
+          fi
+          if [[ -n "$(git status --porcelain -- .github/workflows/hexlet-check.yml)" ]]; then
+            echo "hexlet-check.yml must not be changed" >&2
+            exit 1
+          fi
+          git diff --check
+
+      - name: Run full project checks after implementation
+        if: needs.validate.outputs.mode == 'implement-spec'
+        run: mise run check
+
+      - name: Create green feature commit
+        if: needs.validate.outputs.mode == 'implement-spec'
+        id: green-commit
+        shell: bash
+        env:
+          SPEC_NUMBER: ${{ steps.implementation-context.outputs.specNumber }}
+        run: |
+          git add -A
+          git diff --cached --check
+          git commit -m "feat: реализовать спецификацию #${SPEC_NUMBER}"
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Push implementation to the same draft PR branch
+        if: needs.validate.outputs.mode == 'implement-spec'
+        env:
+          ISSUE_NUMBER: ${{ needs.validate.outputs.number }}
+        run: git push origin "HEAD:agent/issue-${ISSUE_NUMBER}-${GITHUB_RUN_ID}"
+
+      - name: Update and mark the same PR ready for review
+        if: needs.validate.outputs.mode == 'implement-spec'
+        shell: bash
+        env:
+          BODY_PHASE: implementation
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          GREEN_COMMIT: ${{ steps.green-commit.outputs.sha }}
+          ISSUE_NUMBER: ${{ needs.validate.outputs.number }}
+          PR_NUMBER: ${{ steps.create-pr.outputs.number }}
+          RED_COMMIT: ${{ steps.red-commit.outputs.sha }}
+          SPEC_NUMBER: ${{ steps.implementation-context.outputs.specNumber }}
+        run: |
+          RED_CI_URL="$(cat "$RUNNER_TEMP/red-ci-url.txt")"
+          export RED_CI_URL
+          node .github/scripts/pr-agent.mjs pr-body
+          gh pr edit "$PR_NUMBER" --body-file "$RUNNER_TEMP/agent-pr-body.md"
+          gh pr ready "$PR_NUMBER"
 
       - name: Publish success
         shell: bash
@@ -230,7 +364,7 @@ jobs:
         run: |
           commit=$(git rev-parse HEAD)
           if [[ "$AGENT_MODE" == "implement-spec" ]]; then
-            result=$(cat "$RUNNER_TEMP/pr-url.txt")
+            result="Draft PR с red тестами переведён в ready for review после зелёного check: $(cat "$RUNNER_TEMP/pr-url.txt")."
           else
             result="Исправление отправлено в текущую ветку PR."
           fi
@@ -250,4 +384,4 @@ jobs:
           TARGET_NUMBER: ${{ needs.validate.outputs.number }}
         run: |
           gh api --method POST "repos/${GITHUB_REPOSITORY}/issues/${TARGET_NUMBER}/comments" \
-            --raw-field body="Не удалось выполнить команду Kimi Code. Код main не изменён; подробности доступны в [прогоне Actions](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID})."
+            --raw-field body="Не удалось выполнить команду Kimi Code. Код main не изменён; draft PR, если он был создан, не переведён в ready for review. Подробности доступны в [прогоне Actions](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID})."
