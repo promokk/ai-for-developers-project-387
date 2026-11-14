@@ -1,0 +1,171 @@
+name: Kimi Fork PR Review
+
+on:
+  # Артефакт содержит только числа и SHA; PR повторно проверяется через API, код fork не загружается.
+  # jactionlint ignore=dangerous-triggers
+  workflow_run:
+    workflows: [Kimi PR Review]
+    types: [completed]
+
+permissions: {}
+
+concurrency:
+  group: kimi-pr-review-fork-${{ github.event.workflow_run.id }}
+  cancel-in-progress: true
+
+jobs:
+  prepare:
+    if: >-
+      github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    permissions:
+      actions: read
+      contents: read
+      pull-requests: read
+    outputs:
+      valid: ${{ steps.signal.outputs.valid }}
+      pr-number: ${{ steps.signal.outputs.prNumber }}
+      head-sha: ${{ steps.signal.outputs.headSha }}
+      base-sha: ${{ steps.signal.outputs.baseSha }}
+    steps:
+      - name: Check for an unprivileged fork signal
+        id: artifact
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_RUN_ID: ${{ github.event.workflow_run.id }}
+        run: |
+          artifact_name="kimi-pr-review-fork-$SOURCE_RUN_ID"
+          count=$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${SOURCE_RUN_ID}/artifacts" \
+            --jq ".artifacts | map(select(.name == \"$artifact_name\")) | length")
+          if [[ "$count" == "0" ]]; then
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "Fork-signal отсутствует: same-repo, draft или неподдерживаемый исходный run пропускается."
+          else
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Checkout trusted workflow scripts
+        if: steps.artifact.outputs.present == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Download unprivileged fork signal
+        if: steps.artifact.outputs.present == 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_RUN_ID: ${{ github.event.workflow_run.id }}
+        run: |
+          gh run download "$SOURCE_RUN_ID" \
+            --name "kimi-pr-review-fork-$SOURCE_RUN_ID" \
+            --dir "$RUNNER_TEMP"
+
+      - name: Verify current fork PR head
+        if: steps.artifact.outputs.present == 'true'
+        id: signal
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_RUN_ID: ${{ github.event.workflow_run.id }}
+        run: node .github/scripts/pr-review.mjs prepare-fork
+
+  review:
+    needs: prepare
+    if: needs.prepare.outputs.valid == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    concurrency:
+      group: kimi-pr-review-${{ needs.prepare.outputs.pr-number }}
+      cancel-in-progress: true
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: write
+    steps:
+      - name: Checkout trusted base revision only
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ needs.prepare.outputs.base-sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Reserve one of five reviews before model call
+        id: budget
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ needs.prepare.outputs.head-sha }}
+          PR_NUMBER: ${{ needs.prepare.outputs.pr-number }}
+        run: node .github/scripts/pr-review.mjs reserve
+
+      - name: Recheck exact head after reservation
+        if: steps.budget.outputs.allowed == 'true'
+        id: current-head
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ needs.prepare.outputs.head-sha }}
+          PR_NUMBER: ${{ needs.prepare.outputs.pr-number }}
+        run: node .github/scripts/pr-review.mjs check-head
+
+      - name: Setup project tools
+        if: steps.current-head.outputs.allowed == 'true'
+        uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
+
+      - name: Install JS dependencies
+        if: steps.current-head.outputs.allowed == 'true'
+        run: mise run install:js
+
+      - name: Build review context
+        if: steps.current-head.outputs.allowed == 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ needs.prepare.outputs.head-sha }}
+          PR_NUMBER: ${{ needs.prepare.outputs.pr-number }}
+        run: node .github/scripts/pr-review.mjs context
+
+      - name: Run read-only Kimi review
+        if: steps.current-head.outputs.allowed == 'true'
+        shell: bash
+        env:
+          KIMI_CODE_HOME: ${{ runner.temp }}/kimi-code-home
+          KIMI_CODE_NO_AUTO_UPDATE: "1"
+          KIMI_DISABLE_TELEMETRY: "1"
+          KIMI_MODEL_API_KEY: ${{ secrets.KIMI_API_KEY }}
+          KIMI_MODEL_BASE_URL: https://api.kimi.com/coding/v1
+          KIMI_MODEL_NAME: k3.1-pro
+        run: |
+          mise exec -- pnpm exec kimi --agent-file .kimi-code/agents/github-pr-reviewer.md \
+            --prompt "$(cat "$RUNNER_TEMP/review-prompt.txt")" \
+            > "$RUNNER_TEMP/review-response.md"
+          if [[ ! -s "$RUNNER_TEMP/review-response.md" ]]; then
+            echo "Kimi Code returned an empty review" >&2
+            exit 1
+          fi
+
+      - name: Publish overall review
+        if: steps.current-head.outputs.allowed == 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ needs.prepare.outputs.pr-number }}
+        run: |
+          gh api --method POST "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}/reviews" \
+            --raw-field event=COMMENT \
+            --raw-field body="$(cat "$RUNNER_TEMP/review-response.md")"
+
+      - name: Report review failure
+        if: failure()
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ needs.prepare.outputs.pr-number }}
+        run: |
+          gh api --method POST "repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/comments" \
+            --raw-field body="Авторевью fork PR не завершилось. Подробности доступны в [прогоне Actions](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID})."

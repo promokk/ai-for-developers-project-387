@@ -34,7 +34,9 @@ jobs:
           COMMENT_BODY: ${{ github.event.comment.body }}
         run: |
           request="${COMMENT_BODY#/agent}"
-          if [[ "$request" =~ ^[[:space:]] ]] && [[ "$request" =~ [^[:space:]] ]]; then
+          if [[ "$COMMENT_BODY" =~ ^/agent[[:space:]]+implement-spec[[:space:]]*$ ]]; then
+            echo "valid=false" >> "$GITHUB_OUTPUT"
+          elif [[ "$request" =~ ^[[:space:]] ]] && [[ "$request" =~ [^[:space:]] ]]; then
             echo "valid=true" >> "$GITHUB_OUTPUT"
           else
             echo "valid=false" >> "$GITHUB_OUTPUT"

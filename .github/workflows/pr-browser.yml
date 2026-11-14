@@ -1,0 +1,129 @@
+name: PR Browser Verification
+
+on:
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: Номер Pull Request
+        required: true
+        type: number
+      expected_head_sha:
+        description: Полный ожидаемый SHA текущего head PR
+        required: true
+        type: string
+
+permissions: {}
+
+jobs:
+  browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      pr-number: ${{ steps.verify.outputs.pr-number }}
+      artifact-id: ${{ steps.upload.outputs.artifact-id }}
+      result: ${{ steps.browser.outcome || 'failure' }}
+    steps:
+      - name: Verify exact current PR head
+        id: verify
+        shell: bash
+        env:
+          EXPECTED_HEAD_SHA: ${{ inputs.expected_head_sha }}
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ inputs.pr_number }}
+        run: |
+          if [[ ! "$EXPECTED_HEAD_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "expected_head_sha must be a full lowercase SHA" >&2
+            exit 1
+          fi
+          gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" > "$RUNNER_TEMP/pr.json"
+          actual=$(jq -r .head.sha "$RUNNER_TEMP/pr.json")
+          if [[ "$actual" != "$EXPECTED_HEAD_SHA" ]]; then
+            echo "PR head mismatch: expected $EXPECTED_HEAD_SHA, actual $actual" >&2
+            exit 1
+          fi
+          repository=$(jq -r .head.repo.full_name "$RUNNER_TEMP/pr.json")
+          echo "repository=$repository" >> "$GITHUB_OUTPUT"
+          echo "pr-number=$PR_NUMBER" >> "$GITHUB_OUTPUT"
+          echo "Verified exact PR head $actual"
+
+      - name: Checkout only the verified commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: ${{ steps.verify.outputs.repository }}
+          ref: ${{ inputs.expected_head_sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Setup project tools
+        uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
+
+      - name: Install application and Chromium
+        run: |
+          mise run install:backend
+          mise run install:playwright
+          mise run gen
+
+      - name: Run independent main and neighboring browser scenarios
+        id: browser
+        run: pnpm --dir frontend exec playwright test --config playwright.pr.config.ts
+
+      - name: Record verification metadata
+        if: always()
+        shell: bash
+        env:
+          EXPECTED_HEAD_SHA: ${{ inputs.expected_head_sha }}
+          PR_NUMBER: ${{ inputs.pr_number }}
+          TEST_RESULT: ${{ steps.browser.outcome || 'failure' }}
+        run: |
+          node --input-type=module <<'NODE'
+          import { writeFileSync } from "node:fs";
+          const metadata = {
+            prNumber: Number(process.env.PR_NUMBER),
+            headSha: process.env.EXPECTED_HEAD_SHA,
+            result: process.env.TEST_RESULT,
+            runUrl: `${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}`,
+          };
+          writeFileSync(`${process.env.RUNNER_TEMP}/browser-metadata.json`, `${JSON.stringify(metadata, null, 2)}\n`);
+          NODE
+
+      - name: Upload report, successful screenshots and metadata
+        if: always()
+        id: upload
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: pr-browser-${{ inputs.pr_number }}-${{ inputs.expected_head_sha }}
+          path: |
+            frontend/playwright-report/
+            frontend/test-results/
+            ${{ runner.temp }}/browser-metadata.json
+          retention-days: 14
+          if-no-files-found: error
+
+  comment:
+    needs: browser
+    if: always() && needs.browser.outputs.pr-number != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+    permissions:
+      issues: write
+    steps:
+      - name: Comment artifact and exact result on PR
+        shell: bash
+        env:
+          ARTIFACT_ID: ${{ needs.browser.outputs.artifact-id }}
+          GH_TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ inputs.expected_head_sha }}
+          PR_NUMBER: ${{ needs.browser.outputs.pr-number }}
+          TEST_RESULT: ${{ needs.browser.outputs.result }}
+        run: |
+          run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          if [[ -n "$ARTIFACT_ID" ]]; then
+            evidence="[HTML report, screenshots и metadata](${run_url}/artifacts/${ARTIFACT_ID})"
+          else
+            evidence="Artifact не загружен; см. журнал прогона"
+          fi
+          gh api --method POST "repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/comments" \
+            --raw-field body="Браузерная проверка head \`${HEAD_SHA}\`: **${TEST_RESULT}**. ${evidence}. [Полный прогон Actions](${run_url}). Artifact хранится 14 дней."

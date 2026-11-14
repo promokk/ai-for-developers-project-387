@@ -3,6 +3,9 @@ name: check
 on:
   push:
     branches:
+      - main
+  pull_request:
+    branches:
       - "**"
 
 concurrency:
@@ -34,11 +37,18 @@ jobs:
       - name: Conventional Commits
         shell: bash
         run: |
-          before="${{ github.event.before }}"
-          if [ "$before" = "0000000000000000000000000000000000000000" ]; then
-            pnpm exec commitlint --last --verbose
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            pnpm exec commitlint \
+              --from "${{ github.event.pull_request.base.sha }}" \
+              --to "${{ github.event.pull_request.head.sha }}" \
+              --verbose
           else
-            pnpm exec commitlint --from "$before" --verbose
+            before="${{ github.event.before }}"
+            if [ "$before" = "0000000000000000000000000000000000000000" ]; then
+              pnpm exec commitlint --last --verbose
+            else
+              pnpm exec commitlint --from "$before" --verbose
+            fi
           fi
 
       - name: OpenAPI breaking changes
