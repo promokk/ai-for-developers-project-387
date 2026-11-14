@@ -4,11 +4,19 @@ import { pathToFileURL } from "node:url";
 
 export const REVIEW_BUDGET = 5;
 const BUDGET_MARKER = /<!-- kimi-pr-review:budget (\{[^\n]+\}) -->/g;
+const REVIEW_COMMENT_AUTHOR = "github-actions[bot]";
+
+function isWorkflowComment(comment) {
+  return comment.user?.type === "Bot" && comment.user.login === REVIEW_COMMENT_AUTHOR;
+}
 
 export function planReviewBudget(comments, { prNumber, runId, runAttempt, headSha }) {
   const runKey = `${runId}:${runAttempt}`;
   const reservations = new Map();
   for (const comment of comments) {
+    if (!isWorkflowComment(comment)) {
+      continue;
+    }
     for (const match of (comment.body ?? "").matchAll(BUDGET_MARKER)) {
       try {
         const marker = JSON.parse(match[1]);
@@ -46,9 +54,13 @@ export function planReviewBudget(comments, { prNumber, runId, runAttempt, headSh
   };
 }
 
+function buildRefusalMarker({ runId, runAttempt }) {
+  return `<!-- kimi-pr-review:refusal ${JSON.stringify({ runId, runAttempt })} -->`;
+}
+
 export function buildRefusalComment({ count, headSha, runUrl, runId, runAttempt }) {
   return [
-    `<!-- kimi-pr-review:refusal {"runId":"${runId}","runAttempt":"${runAttempt}"} -->`,
+    buildRefusalMarker({ runId, runAttempt }),
     `Авторевью отклонено: бюджет из ${REVIEW_BUDGET} запусков для этого PR исчерпан (${count}/${REVIEW_BUDGET}). Модель не вызывалась.`,
     "",
     `Проверявшийся head: \`${headSha}\`.`,
@@ -154,8 +166,12 @@ function reserve() {
   const plan = planReviewBudget(comments, input);
   if (!plan.allowed) {
     const refusal = buildRefusalComment({ ...input, count: plan.count, runUrl: runUrl() });
-    const refusalMarker = `<!-- kimi-pr-review:refusal {"runId":"${input.runId}","runAttempt":"${input.runAttempt}"} -->`;
-    if (!comments.some((comment) => comment.body?.includes(refusalMarker))) {
+    const refusalMarker = buildRefusalMarker(input);
+    if (
+      !comments.some(
+        (comment) => isWorkflowComment(comment) && comment.body?.includes(refusalMarker),
+      )
+    ) {
       gh([
         "api",
         "--method",

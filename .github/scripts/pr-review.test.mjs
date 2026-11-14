@@ -14,7 +14,7 @@ const input = {
   headSha: "a".repeat(40),
 };
 
-function reservation(runId, headSha = input.headSha, runAttempt = "1") {
+function reservation(runId, headSha = input.headSha, runAttempt = "1", user = undefined) {
   return {
     body: `<!-- kimi-pr-review:budget ${JSON.stringify({
       pr: input.prNumber,
@@ -22,6 +22,7 @@ function reservation(runId, headSha = input.headSha, runAttempt = "1") {
       runAttempt,
       headSha,
     })} -->`,
+    user: user ?? { login: "github-actions[bot]", type: "Bot" },
   };
 }
 
@@ -65,9 +66,35 @@ test("дубликаты маркеров одного run считаются о
 test("чужой PR и повреждённые маркеры не влияют на бюджет", () => {
   const other = {
     body: `<!-- kimi-pr-review:budget ${JSON.stringify({ ...input, runId: "999" })} -->`,
+    user: { login: "github-actions[bot]", type: "Bot" },
   };
-  const broken = { body: "<!-- kimi-pr-review:budget {broken} -->" };
+  const broken = {
+    body: "<!-- kimi-pr-review:budget {broken} -->",
+    user: { login: "github-actions[bot]", type: "Bot" },
+  };
   assert.equal(planReviewBudget([other, broken], input).count, 1);
+});
+
+test("пользовательские маркеры не расходуют бюджет даже при пяти подделках", () => {
+  const comments = Array.from({ length: REVIEW_BUDGET }, (_, index) =>
+    reservation(String(index), input.headSha, "1", { login: "attacker", type: "User" }),
+  );
+  const plan = planReviewBudget(comments, input);
+  assert.equal(plan.allowed, true);
+  assert.equal(plan.count, 1);
+});
+
+test("маркер другого bot login не считается служебным", () => {
+  const spoofed = reservation("999", input.headSha, "1", {
+    login: "dependabot[bot]",
+    type: "Bot",
+  });
+  assert.deepEqual(planReviewBudget([spoofed], input), {
+    allowed: true,
+    count: 1,
+    duplicate: false,
+    marker: planReviewBudget([], input).marker,
+  });
 });
 
 test("отказ содержит причину, полный head и run, а модель не разрешена", () => {
