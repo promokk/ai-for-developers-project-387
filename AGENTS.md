@@ -96,6 +96,8 @@ API и собранный SPA из `/app/static`, включая fallback для
 - Frontend: браузерные E2E-тесты Playwright в `frontend/tests/`
   (`mise run test:frontend`), Chromium с desktop viewport. Дополнительно
   качество обеспечивается линтерами и `tsc --noEmit` (strict).
+- GitHub Actions: фильтры и валидация автотриажа issues покрыты Node-тестами
+  в `.github/scripts/` (`mise run test:ci`).
 
 ## Проверки качества
 
@@ -151,6 +153,11 @@ API и собранный SPA из `/app/static`, включая fallback для
   GitHub CLI от имени доверенного участника.
 - `gh run list --workflow kimi-agent.yml` — показать прогоны агента.
 - `gh run view <id> --log` — посмотреть журнал конкретного прогона.
+- Новые issues автоматически обрабатывает `.github/workflows/issue-triage.yml`
+  после слияния в `main`. Он присваивает только категорию и `needs-triage` или
+  `needs-info`; issues с любой меткой состояния пропускаются без комментариев.
+- `gh workflow run issue-triage.yml -f issue_number=<номер>` — вручную повторить
+  первичный триаж с теми же фильтрами.
 
 ## Agent skills
 
@@ -160,7 +167,7 @@ API и собранный SPA из `/app/static`, включая fallback для
 
 ### Triage labels
 
-Используются пять стандартных меток triage с одноимёнными строками. См. `docs/agents/triage-labels.md`.
+Используются две стандартные категории и пять меток состояния triage. См. `docs/agents/triage-labels.md`.
 
 ### Domain docs
 
