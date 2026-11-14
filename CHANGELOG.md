@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.6.1](https://github.com/promokk/ai-for-developers-project-387/compare/v0.6.0...v0.6.1) (2026-11-14)
+
+
+### Bug Fixes
+
+* **ci:** принимать префикс Kimi CLI при триаже ([9e27a75](https://github.com/promokk/ai-for-developers-project-387/commit/9e27a75ff05e9f608cc3e030c88b8ec5ad038e16))
+* **ci:** принимать префикс Kimi CLI при триаже ([7cb50f6](https://github.com/promokk/ai-for-developers-project-387/commit/7cb50f606941efdbe9dcc9937b7c1e9e148fb7f0)), closes [#10](https://github.com/promokk/ai-for-developers-project-387/issues/10)
+
 ## [0.6.0](https://github.com/promokk/ai-for-developers-project-387/compare/v0.5.0...v0.6.0) (2026-11-14)
 
 ### Features
