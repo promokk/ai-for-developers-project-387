@@ -129,13 +129,22 @@ jobs:
         if: needs.validate.outputs.mode == 'implement-spec'
         shell: bash
         env:
+          RED_PROFILE: ${{ steps.context.outputs.redProfile }}
           TEST_SCOPE: ${{ steps.context.outputs.testScope }}
         run: |
+          if [[ "$TEST_SCOPE" == "frontend" ]]; then
+            mise run install:playwright
+          fi
           set +e
           if [[ "$TEST_SCOPE" == "frontend" ]]; then
-            mise run test:frontend > "$RUNNER_TEMP/acceptance-red.log" 2>&1
+            export ACCEPTANCE_REPORT="$RUNNER_TEMP/acceptance-red.json"
+            PLAYWRIGHT_JSON_OUTPUT_NAME="$ACCEPTANCE_REPORT" \
+              mise exec -- pnpm --dir frontend test:e2e --reporter=json \
+              > "$RUNNER_TEMP/acceptance-red.log" 2>&1
           else
-            mise run test > "$RUNNER_TEMP/acceptance-red.log" 2>&1
+            export ACCEPTANCE_REPORT="$RUNNER_TEMP/acceptance-red.xml"
+            mise exec -- uv run --directory backend pytest --junitxml="$ACCEPTANCE_REPORT" \
+              > "$RUNNER_TEMP/acceptance-red.log" 2>&1
           fi
           status=$?
           set -e
@@ -144,6 +153,7 @@ jobs:
             echo "Acceptance tests are unexpectedly green before implementation" >&2
             exit 1
           fi
+          node .github/scripts/controlled-red.mjs "$TEST_SCOPE"
           echo "Expected red confirmed: acceptance command exited with $status before implementation."
 
       - name: Run full project checks for existing PR

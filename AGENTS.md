@@ -157,7 +157,12 @@ API и собранный SPA из `/app/static`, включая fallback для
 - `/agent implement-spec` в обычном Issue запускает тот же privileged writer:
   одна дочерняя спецификация (либо сам Issue), новая ветка от `origin/main`.
   Фаза 1 добавляет только приёмочные тесты, требует реальный red тест и red CI,
-  создаёт test commit и draft PR. Только её controlled-red push использует
+  создаёт test commit и draft PR. Controlled red проверяется по отдельному
+  structured report: Playwright JSON допускает только ожидаемый failed основной
+  сценарий при зелёных остальных; pytest JUnit XML отклоняет fixture/setup/collection
+  ERROR и принимает только AssertionError в изменённых acceptance-тестах. Для #15
+  основной и negative сценарии помечаются `@controlled-red-description` и
+  `@controlled-red-negative`. Только controlled-red push использует
   `git push --no-verify`, потому что hk pre-push обязан быть красным; green push и
   обычные PR fixes выполняются с hooks. Фаза 2 отдельным вызовом реализует спецификацию,
   требует полный зелёный `mise run check`, создаёт feature commit в той же ветке

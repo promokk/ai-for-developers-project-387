@@ -70,11 +70,21 @@ export function acceptanceSuiteForSpec(spec) {
     : { scope: "backend", testDirectory: "backend/tests" };
 }
 
+export function acceptanceRedProfile(spec, scope) {
+  return scope === "frontend" && spec.body?.includes("booking.eventType.description")
+    ? "event-description"
+    : "generic";
+}
+
 export function acceptanceScenarioInstruction(spec, scope) {
-  if (scope === "frontend" && spec.body?.includes("booking.eventType.description")) {
-    return "Используй существующие test helpers и валидные booking window, даты и часовой пояс из текущих сценариев. Все новые сценарии должны доходить до страницы. Controlled red даёт основной сценарий с заполненным описанием: он падает именно на ожидаемом assertion отсутствующего описания. Негативный сценарий с description null и соседние сценарии проверяют уже корректное поведение и не должны быть искусственно красными. Ошибки setup или API 422, включая START_OUTSIDE_BOOKING_WINDOW и INVALID_DATETIME, не засчитываются как controlled red.";
+  if (acceptanceRedProfile(spec, scope) === "event-description") {
+    return "Используй существующие test helpers и валидные booking window, даты и часовой пояс из текущих сценариев. Все новые сценарии должны доходить до страницы. Основной сценарий с заполненным описанием пометь тегом @controlled-red-description и проверь точное описание через expect(<карточка>).toContainText(<описание>): только он должен упасть на отсутствии описания. Негативный сценарий с description null пометь тегом @controlled-red-negative; он и все соседние сценарии обязаны PASS. Ошибки setup или API 422, включая START_OUTSIDE_BOOKING_WINDOW и INVALID_DATETIME, не засчитываются как controlled red. Structured JSON gate отклонит skipped, timeout и любой другой failed тест.";
   }
-  return "Используй существующие test helpers и валидные fixtures текущего suite. Новые сценарии нового поведения должны доходить до целевого результата и падать на ожидаемых assertions. Негативные и соседние сценарии уже корректного поведения не должны быть искусственно красными. Ошибки setup или API validation не засчитываются как controlled red.";
+  const tagInstruction =
+    scope === "frontend"
+      ? " Пометь ровно один основной сценарий тегом @controlled-red; только он должен дать assertion failure."
+      : "";
+  return `Используй существующие test helpers и валидные fixtures текущего suite.${tagInstruction} Новые сценарии нового поведения должны доходить до целевого результата и падать на ожидаемых assertions. Негативные и соседние сценарии уже корректного поведения не должны быть искусственно красными. Ошибки setup или API validation не засчитываются как controlled red.`;
 }
 
 export function validateTestOnlyPaths(paths, scope) {
@@ -261,7 +271,11 @@ function context() {
       `Связанная спецификация:\n${JSON.stringify({ ...spec, comments: readIssueComments(spec.number) }, null, 2)}`,
       "Следуй основному, негативному и соседнему сценариям спецификации. Не реализуй другие задачи.",
     ].join("\n\n");
-    output({ specNumber: String(spec.number), testScope: suite.scope });
+    output({
+      specNumber: String(spec.number),
+      testScope: suite.scope,
+      redProfile: acceptanceRedProfile(spec, suite.scope),
+    });
   } else {
     const pr = ghJson(["api", `repos/${repository()}/pulls/${number}`]);
     if (pr.head.sha !== requiredEnv("HEAD_SHA") || pr.head.repo.full_name !== repository()) {

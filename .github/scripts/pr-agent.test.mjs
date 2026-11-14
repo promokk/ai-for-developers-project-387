@@ -109,10 +109,13 @@ test("acceptance prompt для #15 требует red только у новог
     { body: "Использовать booking.eventType.description; при null описание отсутствует." },
     "frontend",
   );
-  assert.match(instruction, /основной сценарий с заполненным описанием/);
+  assert.match(instruction, /Основной сценарий с заполненным описанием/);
   assert.match(instruction, /description null/);
-  assert.match(instruction, /не должны быть искусственно красными/);
+  assert.match(instruction, /соседние сценарии обязаны PASS/);
   assert.match(instruction, /START_OUTSIDE_BOOKING_WINDOW/);
+  assert.match(instruction, /@controlled-red-description/);
+  assert.match(instruction, /@controlled-red-negative/);
+  assert.match(instruction, /toContainText/);
 });
 
 test("acceptance prompt не переносит требования страницы на backend suite", () => {

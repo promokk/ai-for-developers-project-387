@@ -1,0 +1,153 @@
+import { execFileSync } from "node:child_process";
+import { readFileSync } from "node:fs";
+import { fileURLToPath, pathToFileURL } from "node:url";
+
+const PYTEST_JUNIT_PARSER = fileURLToPath(new URL("./pytest-junit.py", import.meta.url));
+
+export function readBackendControlledRedReport(path) {
+  return JSON.parse(
+    execFileSync("python", [PYTEST_JUNIT_PARSER, path], {
+      encoding: "utf8",
+      stdio: ["pipe", "pipe", "inherit"],
+    }),
+  );
+}
+
+function reportSpecs(report) {
+  const specs = [];
+  function visit(suite) {
+    specs.push(...(suite.specs ?? []));
+    for (const child of suite.suites ?? []) {
+      visit(child);
+    }
+  }
+  for (const suite of report.suites ?? []) {
+    visit(suite);
+  }
+  return specs;
+}
+
+export function validateBackendControlledRed(report, changedTestFiles) {
+  if (report.tests.some((entry) => entry.status === "error")) {
+    throw new Error("Backend controlled red отклонён: fixture/setup/collection ERROR");
+  }
+  const modules = changedTestFiles.map((file) =>
+    file.replace(/^backend\//, "").replace(/\.py$/, "").replaceAll("/", "."),
+  );
+  const failed = report.tests.filter((entry) => entry.status === "failed");
+  if (failed.length === 0) {
+    throw new Error("Backend controlled red требует failed assertion нового теста");
+  }
+  for (const entry of failed) {
+    if (
+      entry.failureType !== "AssertionError" ||
+      !modules.some(
+        (module) => entry.className === module || entry.className.startsWith(`${module}.`),
+      )
+    ) {
+      throw new Error("Backend controlled red допускает только AssertionError в изменённых тестах");
+    }
+  }
+}
+
+export function validateFrontendControlledRed(report, profile) {
+  if ((report.errors ?? []).length > 0) {
+    throw new Error("Controlled red отклонён: report содержит ошибки запуска Playwright");
+  }
+  const specs = reportSpecs(report);
+  const entries = specs.flatMap((spec) => spec.tests);
+  if (
+    entries.some(
+      (entry) =>
+        entry.status === "skipped" || entry.results.some((result) => result.status === "skipped"),
+    )
+  ) {
+    throw new Error("Controlled red отклонён: report содержит skipped тесты");
+  }
+  if (
+    entries.some(
+      (entry) =>
+        entry.results.length !== 1 ||
+        !["passed", "failed"].includes(entry.results[0].status),
+    )
+  ) {
+    throw new Error("Controlled red отклонён: timeout, interrupted или retry в report");
+  }
+  const failed = specs.filter((spec) => spec.tests.some((entry) => entry.status === "unexpected"));
+  if (failed.length !== 1 || failed.length === specs.length) {
+    throw new Error("Controlled red требует ровно один failed тест и зелёные остальные сценарии");
+  }
+  if (!["event-description", "generic"].includes(profile)) {
+    throw new Error(`Неизвестный controlled-red profile: ${profile}`);
+  }
+  const expectedTag =
+    profile === "event-description" ? "@controlled-red-description" : "@controlled-red";
+  if (!failed[0].tags.includes(expectedTag)) {
+    throw new Error(`Controlled red требует тег ${expectedTag} у failed основного сценария`);
+  }
+  if (profile === "event-description") {
+    const negative = specs.filter((spec) => spec.tags.includes("@controlled-red-negative"));
+    if (
+      negative.length !== 1 ||
+      negative[0].file !== "upcoming-events.spec.ts" ||
+      negative[0].tests.some((entry) => entry.status !== "expected")
+    ) {
+      throw new Error("Controlled red #15 требует ровно один negative со статусом PASS");
+    }
+    const spec = failed[0];
+    const message = spec.tests[0].results[0].error?.message ?? "";
+    if (
+      spec.file !== "upcoming-events.spec.ts" ||
+      !spec.tags.includes("@controlled-red-description") ||
+      !message.includes("toContainText")
+    ) {
+      throw new Error("Controlled red #15 должен падать на ожидаемом отсутствии описания");
+    }
+  } else {
+    const message = failed[0].tests[0].results[0].error?.message ?? "";
+    if (!message.includes("expect")) {
+      throw new Error("Controlled red требует assertion failure основного сценария");
+    }
+  }
+}
+
+function requiredEnv(name) {
+  const value = process.env[name];
+  if (!value) {
+    throw new Error(`${name} обязателен`);
+  }
+  return value;
+}
+
+function changedBackendTestFiles() {
+  const tracked = execFileSync(
+    "git",
+    ["diff", "--name-only", "--diff-filter=ACMR", "origin/main", "--", "backend/tests"],
+    { encoding: "utf8" },
+  );
+  const untracked = execFileSync(
+    "git",
+    ["ls-files", "--others", "--exclude-standard", "--", "backend/tests"],
+    { encoding: "utf8" },
+  );
+  return [...new Set(`${tracked}\n${untracked}`.split("\n").filter(Boolean))];
+}
+
+function runCli() {
+  const scope = process.argv[2];
+  const reportPath = requiredEnv("ACCEPTANCE_REPORT");
+  if (scope === "frontend") {
+    const report = JSON.parse(readFileSync(reportPath, "utf8"));
+    validateFrontendControlledRed(report, requiredEnv("RED_PROFILE"));
+  } else if (scope === "backend") {
+    const report = readBackendControlledRedReport(reportPath);
+    validateBackendControlledRed(report, changedBackendTestFiles());
+  } else {
+    throw new Error(`Неизвестный acceptance scope: ${scope}`);
+  }
+  console.log(`Structured controlled-red report принят для ${scope}.`);
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  runCli();
+}
