@@ -108,7 +108,9 @@ jobs:
           const request = process.env.COMMENT_BODY.replace(/^\/agent\s+/, "");
           const prompt = [
             "Ответь на запрос, используя контекст issue и при необходимости файлы репозитория.",
+            `Номер issue: ${issue.number}`,
             `Название issue: ${issue.title}`,
+            `Текущие метки: ${JSON.stringify(issue.labels.map((label) => label.name))}`,
             `Описание issue:\n${issue.body ?? ""}`,
             `Предыдущие комментарии в формате JSON:\n${JSON.stringify(comments)}`,
             `Запрос:\n${request}`,
@@ -134,18 +136,13 @@ jobs:
             exit 1
           fi
 
-      - name: Publish response
+      - name: Apply issue actions and publish response
         shell: bash
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           ISSUE_NUMBER: ${{ github.event.issue.number }}
         run: |
-          node --input-type=module <<'NODE'
-          import { readFileSync, writeFileSync } from "node:fs";
-
-          const body = readFileSync(`${process.env.RUNNER_TEMP}/agent-response.md`, "utf8");
-          writeFileSync(`${process.env.RUNNER_TEMP}/agent-comment.json`, JSON.stringify({ body }));
-          NODE
+          node .github/scripts/issue-agent.mjs apply
           gh api --method POST "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}/comments" \
             --input "$RUNNER_TEMP/agent-comment.json"
 
