@@ -25,16 +25,22 @@ jobs:
       contents: read
       id-token: write
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
       - name: Validate configuration
         shell: bash
         env:
           APP_URL: ${{ vars.APP_URL }}
         run: |
+          mkdir -p "$RUNNER_TEMP/audit"
           if [[ ! "$APP_URL" =~ ^https:// ]]; then
             echo "Set the APP_URL repository variable to an HTTPS application URL" >&2
             exit 1
           fi
-          mkdir -p "$RUNNER_TEMP/audit"
 
       - name: Create GitHub App installation token
         id: app-token
@@ -44,12 +50,6 @@ jobs:
           private-key: ${{ secrets.KIMI_APP_PRIVATE_KEY }}
           permission-contents: read
           permission-issues: write
-
-      - name: Checkout repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          fetch-depth: 1
-          persist-credentials: false
 
       - name: Setup project tools
         uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7

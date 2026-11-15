@@ -1,5 +1,10 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 import {
   buildAuditReport,
   buildIssuePayload,
@@ -8,7 +13,10 @@ import {
   parseAuditResponse,
   summarizePlaywrightReport,
   TRAINING_FINGERPRINT,
+  validateDuplicateReference,
 } from "./audit.mjs";
+
+const AUDIT_SCRIPT = fileURLToPath(new URL("./audit.mjs", import.meta.url));
 
 function createAction(overrides = {}) {
   return {
@@ -17,6 +25,17 @@ function createAction(overrides = {}) {
     category: "bug",
     title: "Не создаётся бронирование",
     body: "Шаги воспроизведения и критерии приёмки",
+    ...overrides,
+  };
+}
+
+function duplicateAction(overrides = {}) {
+  return {
+    type: "no_issue",
+    reason: "duplicate",
+    details: "Находка уже зарегистрирована",
+    duplicateIssue: 42,
+    fingerprint: "external.booking-flow",
     ...overrides,
   };
 }
@@ -111,6 +130,7 @@ for (const [name, action] of [
   ["лишнее поле", createAction({ repository: "other/repository" })],
   ["неизвестная категория", createAction({ category: "documentation" })],
   ["недопустимый fingerprint", createAction({ fingerprint: "external/booking-flow" })],
+  ["отсутствующий fingerprint", createAction({ fingerprint: undefined })],
   ["собственный служебный маркер", createAction({ body: "<!-- calendar-audit:fake -->" })],
   ["учебный fingerprint в обычном режиме", trainingAction()],
 ]) {
@@ -119,11 +139,15 @@ for (const [name, action] of [
   });
 }
 
-test("duplicate требует номер существующей задачи", () => {
+test("duplicate требует номер и fingerprint существующей задачи", () => {
+  assert.deepEqual(parseAuditResponse(JSON.stringify(duplicateAction())), duplicateAction());
   assert.throws(() =>
     parseAuditResponse(
       JSON.stringify({ type: "no_issue", reason: "duplicate", details: "Уже есть" }),
     ),
+  );
+  assert.throws(() =>
+    parseAuditResponse(JSON.stringify(duplicateAction({ fingerprint: undefined }))),
   );
 });
 
@@ -156,6 +180,42 @@ test("дубль находится в открытом и закрытом issu
   };
   assert.equal(findDuplicate([pullRequest, duplicate], "external.booking-flow"), duplicate);
   assert.equal(findDuplicate([pullRequest], "external.booking-flow"), null);
+});
+
+test("duplicate проверяется по исходному и актуальному спискам issues", () => {
+  const issue = {
+    number: 42,
+    body: "Описание\n\n<!-- calendar-audit:external.booking-flow -->",
+  };
+  assert.equal(validateDuplicateReference([issue], [issue], duplicateAction()), issue);
+  assert.throws(() => validateDuplicateReference([], [issue], duplicateAction()), /существующий issue/);
+  assert.throws(() => validateDuplicateReference([issue], [], duplicateAction()), /исходного списка/);
+});
+
+test("duplicate не может ссылаться на PR или другой fingerprint", () => {
+  const pullRequest = { number: 42, pull_request: {}, body: "" };
+  assert.throws(() =>
+    validateDuplicateReference([pullRequest], [pullRequest], duplicateAction()),
+  );
+  const otherFinding = {
+    number: 42,
+    body: "<!-- calendar-audit:code.other-finding -->",
+  };
+  assert.throws(
+    () => validateDuplicateReference([otherFinding], [otherFinding], duplicateAction()),
+    /не совпадает/,
+  );
+});
+
+test("первый учебный запуск не принимает необоснованный duplicate", () => {
+  const action = duplicateAction({ fingerprint: TRAINING_FINGERPRINT });
+  const parsed = parseAuditResponse(JSON.stringify(action), { trainingMode: true });
+  assert.throws(() => validateDuplicateReference([], [], parsed), /существующий issue/);
+});
+
+test("duplicate допускает немаркированный issue из исходного списка", () => {
+  const issue = { number: 42, body: "Ручное описание той же находки" };
+  assert.equal(validateDuplicateReference([issue], [issue], duplicateAction()), issue);
 });
 
 test("workflow добавляет fingerprint и только разрешённые метки", () => {
@@ -197,4 +257,26 @@ test("отчёт повторного запуска ссылается на с�
   });
   assert.match(report, /Новая задача не создана/);
   assert.match(report, /#42/);
+});
+
+
+test("report создаёт отсутствующий каталог даже при пустом APP_URL", () => {
+  const temp = mkdtempSync(join(tmpdir(), "calendar-audit-"));
+  try {
+    execFileSync(process.execPath, [AUDIT_SCRIPT, "report"], {
+      env: {
+        ...process.env,
+        RUNNER_TEMP: temp,
+        APP_URL: "",
+        RUN_URL: "https://example.test/run/invalid-config",
+        TRAINING_MODE: "false",
+      },
+      stdio: "pipe",
+    });
+    const report = readFileSync(join(temp, "audit", "report.md"), "utf8");
+    assert.match(report, /Результат агента не применён/);
+    assert.match(report, /invalid-config/);
+  } finally {
+    rmSync(temp, { recursive: true, force: true });
+  }
 });

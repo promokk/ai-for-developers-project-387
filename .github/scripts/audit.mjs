@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 
 const CATEGORIES = new Set(["bug", "enhancement"]);
@@ -51,6 +51,21 @@ export function findDuplicate(issues, fingerprint) {
         !issue.pull_request && fingerprintFromBody(issue.body ?? "") === fingerprint,
     ) ?? null
   );
+}
+
+export function validateDuplicateReference(currentIssues, initialIssues, action) {
+  const initial = initialIssues.find((issue) => issue.number === action.duplicateIssue);
+  const current = currentIssues.find((issue) => issue.number === action.duplicateIssue);
+  if (!initial || initial.pull_request || !current || current.pull_request) {
+    throw new Error("Duplicate должен ссылаться на существующий issue из исходного списка, а не на PR");
+  }
+  for (const issue of [initial, current]) {
+    const fingerprint = fingerprintFromBody(issue.body ?? "");
+    if (fingerprint && fingerprint !== action.fingerprint) {
+      throw new Error("Fingerprint найденного duplicate не совпадает с текущей находкой");
+    }
+  }
+  return current;
 }
 
 function reportSpecs(report) {
@@ -136,8 +151,8 @@ export function buildPrompt({ report, issues, trainingMode, runUrl, appUrl }) {
     "Выбери не более одной находки. Приоритет: подтверждённый bug, затем optimization с измеримым эффектом, затем локальный refactoring. Оптимизация и рефакторинг получают category enhancement. Не перечисляй невыбранных кандидатов.",
     "Для bug в body укажи шаги воспроизведения, ожидаемый и фактический результат, страницу или API и доказательства. Для optimization укажи конкретный файл и символ, измеримый ожидаемый эффект и способ проверки. Для refactoring укажи конкретный файл и символ, понятную выгоду, ограниченный объём и критерии приёмки. Не создавай задачу по общему замечанию о стиле или архитектуре.",
     "Fingerprint должен стабильно повторяться между прогонами: для ошибки внешнего сценария начинай с external. и используй ASCII-slug файла и сценария; для находки в коде начинай с code. и используй ASCII-slug пути и символа. Не включай run ID, дату, UUID или формулировку заголовка. Допустимы строчные латинские буквы, цифры, точки и дефисы, максимум 120 символов.",
-    "Если эквивалентная задача уже есть среди открытых или закрытых issues, верни no_issue с reason duplicate и её номером в duplicateIssue. Не переоткрывай закрытые issues.",
-    "Верни ровно один JSON-объект без Markdown и другого текста. Для создания: {\"type\":\"create_issue\",\"fingerprint\":\"...\",\"category\":\"bug|enhancement\",\"title\":\"...\",\"body\":\"...\"}. Для пропуска: {\"type\":\"no_issue\",\"reason\":\"no-findings|duplicate|insufficient-evidence\",\"details\":\"...\",\"duplicateIssue\":123}; duplicateIssue указывай только для duplicate.",
+    "Если эквивалентная задача уже есть среди открытых или закрытых issues, верни no_issue с reason duplicate, её номером в duplicateIssue и fingerprint текущей находки. Не переоткрывай закрытые issues.",
+    "Верни ровно один JSON-объект без Markdown и другого текста. Для создания: {\"type\":\"create_issue\",\"fingerprint\":\"...\",\"category\":\"bug|enhancement\",\"title\":\"...\",\"body\":\"...\"}. Для пропуска: {\"type\":\"no_issue\",\"reason\":\"no-findings|duplicate|insufficient-evidence\",\"details\":\"...\",\"duplicateIssue\":123,\"fingerprint\":\"...\"}; duplicateIssue и fingerprint указывай только для duplicate.",
   ].join("\n\n");
 }
 
@@ -151,7 +166,7 @@ export function parseAuditResponse(raw, { trainingMode = false } = {}) {
   assertObject(result, "Ответ Kimi");
 
   if (result.type === "no_issue") {
-    assertKeys(result, new Set(["type", "reason", "details", "duplicateIssue"]));
+    assertKeys(result, new Set(["type", "reason", "details", "duplicateIssue", "fingerprint"]));
     if (!NO_ISSUE_REASONS.has(result.reason)) {
       throw new Error(`Недопустимая причина пропуска: ${result.reason}`);
     }
@@ -164,12 +179,19 @@ export function parseAuditResponse(raw, { trainingMode = false } = {}) {
       if (!Number.isInteger(result.duplicateIssue) || result.duplicateIssue < 1) {
         throw new Error("Для duplicate нужен положительный номер duplicateIssue");
       }
+      if (typeof result.fingerprint !== "string" || !FINGERPRINT_PATTERN.test(result.fingerprint)) {
+        throw new Error("Для duplicate нужен корректный fingerprint");
+      }
       parsed.duplicateIssue = result.duplicateIssue;
-    } else if (result.duplicateIssue !== undefined) {
-      throw new Error("duplicateIssue допустим только для duplicate");
+      parsed.fingerprint = result.fingerprint;
+    } else if (result.duplicateIssue !== undefined || result.fingerprint !== undefined) {
+      throw new Error("duplicateIssue и fingerprint допустимы только для duplicate");
     }
     if (trainingMode && result.reason !== "duplicate") {
       throw new Error("Учебный режим допускает только создание задачи или duplicate");
+    }
+    if (trainingMode && result.fingerprint !== TRAINING_FINGERPRINT) {
+      throw new Error("Учебный duplicate требует стабильный учебный fingerprint");
     }
     return parsed;
   }
@@ -178,7 +200,7 @@ export function parseAuditResponse(raw, { trainingMode = false } = {}) {
     throw new Error(`Недопустимый тип результата: ${result.type}`);
   }
   assertKeys(result, new Set(["type", "fingerprint", "category", "title", "body"]));
-  if (!FINGERPRINT_PATTERN.test(result.fingerprint)) {
+  if (typeof result.fingerprint !== "string" || !FINGERPRINT_PATTERN.test(result.fingerprint)) {
     throw new Error("Недопустимый fingerprint");
   }
   if (!CATEGORIES.has(result.category)) {
@@ -279,6 +301,7 @@ function runCli() {
     throw new Error("Переменная RUNNER_TEMP не задана");
   }
   const directory = `${temp}/audit`;
+  mkdirSync(directory, { recursive: true });
 
   if (command === "prompt") {
     const trainingMode = process.env.TRAINING_MODE === "true";
@@ -305,11 +328,16 @@ function runCli() {
     const action = parseAuditResponse(raw, input);
     let result;
     if (action.type === "no_issue") {
+      let duplicate;
+      if (action.reason === "duplicate") {
+        const initialIssues = flattenPages(readJson(`${directory}/existing-issues.json`));
+        duplicate = validateDuplicateReference(listIssues(repository), initialIssues, action);
+      }
       result = {
-        status: action.reason === "duplicate" ? "duplicate" : "no-finding",
+        status: duplicate ? "duplicate" : "no-finding",
         details: action.details,
-        issueNumber: action.duplicateIssue,
-        issueUrl: action.duplicateIssue ? issueUrl(repository, action.duplicateIssue) : undefined,
+        issueNumber: duplicate?.number,
+        issueUrl: duplicate ? issueUrl(repository, duplicate.number) : undefined,
       };
     } else {
       const duplicate = findDuplicate(listIssues(repository), action.fingerprint);
