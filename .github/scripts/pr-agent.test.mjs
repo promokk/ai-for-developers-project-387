@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  acceptanceScenarioInstruction,
   acceptanceSuiteForSpec,
   buildImplementationPrBody,
   classifyAgentEvent,
@@ -101,6 +102,29 @@ test("спецификация #15 выбирает frontend acceptance suite", 
     testDirectory: "backend/tests",
   });
   assert.throws(() => acceptanceSuiteForSpec({ body: "Добавить тесты" }));
+});
+
+test("acceptance prompt для #15 требует red только у нового основного поведения", () => {
+  const instruction = acceptanceScenarioInstruction(
+    { body: "Использовать booking.eventType.description; при null описание отсутствует." },
+    "frontend",
+  );
+  assert.match(instruction, /Основной сценарий с заполненным описанием/);
+  assert.match(instruction, /description null/);
+  assert.match(instruction, /соседние сценарии обязаны PASS/);
+  assert.match(instruction, /START_OUTSIDE_BOOKING_WINDOW/);
+  assert.match(instruction, /@controlled-red-description/);
+  assert.match(instruction, /@controlled-red-negative/);
+  assert.match(instruction, /toContainText/);
+});
+
+test("acceptance prompt не переносит требования страницы на backend suite", () => {
+  const instruction = acceptanceScenarioInstruction(
+    { body: "Добавить backend/tests/test_bookings.py для booking.eventType.description" },
+    "backend",
+  );
+  assert.match(instruction, /ожидаемых assertions/);
+  assert.doesNotMatch(instruction, /до страницы|отсутствующего описания/);
 });
 
 test("фаза 1 разрешает только тесты и отклоняет скрытую реализацию", () => {

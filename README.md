@@ -168,10 +168,16 @@ Issue #9 — спецификация #15); иначе используется 
 
 1. Модель добавляет **только приёмочные тесты** спецификации. Workflow запрещает
    изменения вне каталога тестов (`frontend/tests` для #15), реально запускает
-   релевантный suite и требует nonzero. Затем он создаёт test commit, отправляет
-   новую ветку, открывает **draft PR** и ждёт фактический failed `check`. Для
-   чтения runs используется `GITHUB_TOKEN` с `actions: read`; GitHub App не
-   получает разрешение Actions. Зелёный результат до реализации считается ошибкой.
+   релевантный suite и требует nonzero. Причина red проверяется по отдельному
+   structured report: Playwright JSON требует failed только у помеченного основного
+   сценария и PASS у остальных, а pytest JUnit XML отклоняет fixture/setup/collection
+   ERROR и посторонние либо не-assertion failures. Затем workflow создаёт test commit,
+   отправляет новую ветку, открывает **draft PR** и ждёт фактический failed `check`.
+   Только push controlled red использует `git push --no-verify`: иначе hk pre-push
+   повторно запускает обязанный быть красным полный check и блокирует draft PR.
+   Green/feature push и обычные исправления PR выполняются без bypass. Для чтения
+   runs используется `GITHUB_TOKEN` с `actions: read`; GitHub App не получает
+   разрешение Actions. Зелёный результат до реализации считается ошибкой.
 2. Отдельный вызов модели реализует спецификацию поверх закоммиченных тестов.
    После полного зелёного `mise run check` workflow создаёт feature commit,
    отправляет его в ту же ветку и переводит **тот же PR** в ready for review, что
