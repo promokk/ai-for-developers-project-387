@@ -56,7 +56,6 @@ test.describe.serial("предстоящие события", () => {
     );
     await expect(current).toContainText("Идёт сейчас");
     await expect(current).not.toContainText("current-booking-id");
-    await expect(current).not.toContainText("Короткий звонок");
 
     const later = items.nth(1);
     await expect(later).toContainText("14:00");
@@ -81,5 +80,94 @@ test.describe.serial("предстоящие события", () => {
     await expect(items).toHaveCount(2);
     await expect(page.getByText("anna@example.com")).toHaveCount(0);
     await expect(page.getByText("Идёт сейчас")).toHaveCount(0);
+  });
+
+  test("не показывает технические значения и заглушки без описания @controlled-red-negative", async ({
+    page,
+    request,
+  }) => {
+    await page.clock.install({ time: new Date("2026-03-27T09:00:00Z") });
+    await startBackend(["--now", "2026-03-27T12:00:00+03:00"]);
+    const eventTypeResponse = await request.post("/api/event-types", {
+      data: {
+        name: "Синхронизация",
+        description: null,
+        durationMinutes: 30,
+      },
+    });
+    expect(eventTypeResponse.status(), await eventTypeResponse.text()).toBe(201);
+    const eventType = (await eventTypeResponse.json()) as { id: string };
+    const bookingResponse = await request.post("/api/bookings", {
+      data: {
+        eventTypeId: eventType.id,
+        startsAt: "2026-03-28T09:00+03:00",
+        guestName: "Олег Соколов",
+        guestEmail: "oleg@example.com",
+      },
+      headers: { "Idempotency-Key": crypto.randomUUID() },
+    });
+    expect(bookingResponse.status(), await bookingResponse.text()).toBe(201);
+    const booking = (await bookingResponse.json()) as {
+      eventType: { description: string | null };
+    };
+    expect(booking.eventType.description).toBeNull();
+
+    await page.goto("/events");
+
+    await expect(page.getByRole("region", { name: "суббота, 28 марта" })).toBeVisible();
+    const item = page.getByRole("article");
+    await expect(item).toHaveCount(1);
+    await expect(item).toContainText("09:00");
+    await expect(item).toContainText("09:30");
+    await expect(item).toContainText("Синхронизация");
+    await expect(item).toContainText("30 минут");
+    await expect(item).toContainText("Олег Соколов");
+    await expect(item.getByRole("link", { name: "oleg@example.com" })).toHaveAttribute(
+      "href",
+      "mailto:oleg@example.com",
+    );
+    await expect(item).not.toContainText("null");
+    await expect(item).not.toContainText("undefined");
+    await expect(item).not.toContainText("Описание отсутствует");
+    await expect(item).not.toContainText("Без описания");
+    await expect(item.locator("p")).toHaveCount(0);
+    await expect(page.getByRole("alert")).toHaveCount(0);
+  });
+
+  test("показывает точное описание у каждого события @controlled-red-description", async ({
+    page,
+  }) => {
+    await page.clock.install({ time: new Date("2026-03-27T09:00:00Z") });
+    await startBackend(["--agenda", "--now", "2026-03-27T12:00:00+03:00"]);
+    await page.goto("/events");
+
+    const items = page.getByRole("article");
+    await expect(items).toHaveCount(3);
+
+    const current = items.nth(0);
+    await expect(current).toContainText("Знакомство");
+    await expect(
+      current.getByText(
+        "Короткий звонок, чтобы познакомиться, обсудить задачу и определить следующие шаги",
+        { exact: true },
+      ),
+    ).toBeVisible();
+
+    const later = items.nth(1);
+    await expect(later).toContainText("Глубокий разбор");
+    await expect(
+      later.getByText("Детальный разбор сложной задачи и составление конкретного плана действий", {
+        exact: true,
+      }),
+    ).toBeVisible();
+
+    const nextDay = items.nth(2);
+    await expect(nextDay).toContainText("Консультация");
+    await expect(
+      nextDay.getByText(
+        "Подробное обсуждение вашего вопроса, разбор возможных решений и следующих шагов",
+        { exact: true },
+      ),
+    ).toBeVisible();
   });
 });

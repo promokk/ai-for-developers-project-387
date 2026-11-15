@@ -86,6 +86,9 @@ export default function UpcomingEventsPage() {
                       </div>
                       <div className="agenda-type">
                         <strong>{booking.eventType.name}</strong>
+                        {booking.eventType.description ? (
+                          <p className="agenda-description">{booking.eventType.description}</p>
+                        ) : null}
                         <span>{booking.eventType.durationMinutes} минут</span>
                       </div>
                       <div className="agenda-guest">

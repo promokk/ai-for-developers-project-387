@@ -466,6 +466,14 @@ nav {
   font-size: 12px;
 }
 
+.agenda-description {
+  margin: 0;
+  color: #64748b;
+  font-size: 13px;
+  line-height: 1.5;
+  overflow-wrap: break-word;
+}
+
 .agenda-type strong,
 .agenda-guest strong {
   font-size: 14px;
