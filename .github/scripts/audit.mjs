@@ -61,6 +61,9 @@ export function validateDuplicateReference(currentIssues, initialIssues, action)
   }
   for (const issue of [initial, current]) {
     const fingerprint = fingerprintFromBody(issue.body ?? "");
+    if (action.fingerprint === TRAINING_FINGERPRINT && fingerprint !== TRAINING_FINGERPRINT) {
+      throw new Error("Учебный duplicate должен иметь точный учебный fingerprint");
+    }
     if (fingerprint && fingerprint !== action.fingerprint) {
       throw new Error("Fingerprint найденного duplicate не совпадает с текущей находкой");
     }

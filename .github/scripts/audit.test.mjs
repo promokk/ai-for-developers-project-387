@@ -223,6 +223,23 @@ test("первый учебный запуск не принимает необ�
   const action = duplicateAction({ fingerprint: TRAINING_FINGERPRINT });
   const parsed = parseAuditResponse(JSON.stringify(action), { trainingMode: true });
   assert.throws(() => validateDuplicateReference([], [], parsed), /существующий issue/);
+  const unmarked = { number: 42, body: "Немаркированная задача" };
+  assert.throws(
+    () => validateDuplicateReference([unmarked], [unmarked], parsed),
+    /точный учебный fingerprint/,
+  );
+});
+
+test("учебный duplicate принимает открытый и закрытый issue с учебным маркером", () => {
+  const action = duplicateAction({ fingerprint: TRAINING_FINGERPRINT });
+  for (const state of ["open", "closed"]) {
+    const issue = {
+      number: 42,
+      state,
+      body: `<!-- calendar-audit:${TRAINING_FINGERPRINT} -->`,
+    };
+    assert.equal(validateDuplicateReference([issue], [issue], action), issue);
+  }
 });
 
 test("duplicate допускает немаркированный issue из исходного списка", () => {
