@@ -3,11 +3,24 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const PYTEST_JUNIT_PARSER = fileURLToPath(new URL("./pytest-junit.py", import.meta.url));
+const PYTEST_CHANGED_TESTS_PARSER = fileURLToPath(
+  new URL("./pytest-changed-tests.py", import.meta.url),
+);
 
 export function readBackendControlledRedReport(path) {
   return JSON.parse(
     execFileSync("python", [PYTEST_JUNIT_PARSER, path], {
       encoding: "utf8",
+      stdio: ["pipe", "pipe", "inherit"],
+    }),
+  );
+}
+
+export function readChangedBackendTests(changes) {
+  return JSON.parse(
+    execFileSync("python", [PYTEST_CHANGED_TESTS_PARSER], {
+      encoding: "utf8",
+      input: JSON.stringify(changes),
       stdio: ["pipe", "pipe", "inherit"],
     }),
   );
@@ -27,25 +40,27 @@ function reportSpecs(report) {
   return specs;
 }
 
-export function validateBackendControlledRed(report, changedTestFiles) {
+export function validateBackendControlledRed(report, changedTests) {
   if (report.tests.some((entry) => entry.status === "error")) {
     throw new Error("Backend controlled red отклонён: fixture/setup/collection ERROR");
   }
-  const modules = changedTestFiles.map((file) =>
-    file.replace(/^backend\//, "").replace(/\.py$/, "").replaceAll("/", "."),
-  );
+  if (report.tests.some((entry) => entry.status === "skipped")) {
+    throw new Error("Backend controlled red отклонён: skipped/xfail в acceptance report");
+  }
   const failed = report.tests.filter((entry) => entry.status === "failed");
   if (failed.length === 0) {
     throw new Error("Backend controlled red требует failed assertion нового теста");
   }
   for (const entry of failed) {
-    if (
-      entry.failureType !== "AssertionError" ||
-      !modules.some(
-        (module) => entry.className === module || entry.className.startsWith(`${module}.`),
-      )
-    ) {
-      throw new Error("Backend controlled red допускает только AssertionError в изменённых тестах");
+    const isChanged = changedTests.some(
+      (changed) =>
+        entry.className === changed.className &&
+        (entry.name === changed.name || entry.name.startsWith(`${changed.name}[`)),
+    );
+    if (entry.failureType !== "AssertionError" || !isChanged) {
+      throw new Error(
+        "Backend controlled red допускает только AssertionError в добавленных или изменённых тестах",
+      );
     }
   }
 }
@@ -81,12 +96,12 @@ export function validateFrontendControlledRed(report, profile) {
     throw new Error(`Неизвестный controlled-red profile: ${profile}`);
   }
   const expectedTag =
-    profile === "event-description" ? "@controlled-red-description" : "@controlled-red";
+    profile === "event-description" ? "controlled-red-description" : "controlled-red";
   if (!failed[0].tags.includes(expectedTag)) {
     throw new Error(`Controlled red требует тег ${expectedTag} у failed основного сценария`);
   }
   if (profile === "event-description") {
-    const negative = specs.filter((spec) => spec.tags.includes("@controlled-red-negative"));
+    const negative = specs.filter((spec) => spec.tags.includes("controlled-red-negative"));
     if (
       negative.length !== 1 ||
       negative[0].file !== "upcoming-events.spec.ts" ||
@@ -98,7 +113,6 @@ export function validateFrontendControlledRed(report, profile) {
     const message = spec.tests[0].results[0].error?.message ?? "";
     if (
       spec.file !== "upcoming-events.spec.ts" ||
-      !spec.tags.includes("@controlled-red-description") ||
       !message.includes("toContainText")
     ) {
       throw new Error("Controlled red #15 должен падать на ожидаемом отсутствии описания");
@@ -119,18 +133,32 @@ function requiredEnv(name) {
   return value;
 }
 
-function changedBackendTestFiles() {
-  const tracked = execFileSync(
-    "git",
-    ["diff", "--name-only", "--diff-filter=ACMR", "origin/main", "--", "backend/tests"],
-    { encoding: "utf8" },
-  );
+function changedBackendTests() {
+  const gitPaths = (filter) =>
+    execFileSync(
+      "git",
+      ["diff", "--name-only", `--diff-filter=${filter}`, "origin/main", "--", "backend/tests"],
+      { encoding: "utf8" },
+    )
+      .split("\n")
+      .filter(Boolean);
+  const tracked = gitPaths("ACMR");
   const untracked = execFileSync(
     "git",
     ["ls-files", "--others", "--exclude-standard", "--", "backend/tests"],
     { encoding: "utf8" },
-  );
-  return [...new Set(`${tracked}\n${untracked}`.split("\n").filter(Boolean))];
+  )
+    .split("\n")
+    .filter(Boolean);
+  const added = new Set([...gitPaths("A"), ...untracked]);
+  const changes = [...new Set([...tracked, ...untracked])].map((path) => ({
+    path,
+    base: added.has(path)
+      ? null
+      : execFileSync("git", ["show", `origin/main:${path}`], { encoding: "utf8" }),
+    current: readFileSync(path, "utf8"),
+  }));
+  return readChangedBackendTests(changes);
 }
 
 function runCli() {
@@ -141,7 +169,7 @@ function runCli() {
     validateFrontendControlledRed(report, requiredEnv("RED_PROFILE"));
   } else if (scope === "backend") {
     const report = readBackendControlledRedReport(reportPath);
-    validateBackendControlledRed(report, changedBackendTestFiles());
+    validateBackendControlledRed(report, changedBackendTests());
   } else {
     throw new Error(`Неизвестный acceptance scope: ${scope}`);
   }

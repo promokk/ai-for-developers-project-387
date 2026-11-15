@@ -5,6 +5,7 @@ import { join } from "node:path";
 import test from "node:test";
 import {
   readBackendControlledRedReport,
+  readChangedBackendTests,
   validateBackendControlledRed,
   validateFrontendControlledRed,
 } from "./controlled-red.mjs";
@@ -30,7 +31,7 @@ function failingDescriptionSpec(
   return {
     title: "показывает описание типа события",
     file: "upcoming-events.spec.ts",
-    tags: ["@controlled-red-description"],
+    tags: ["controlled-red-description"],
     tests: [
       {
         expectedStatus: "passed",
@@ -66,7 +67,7 @@ test("ожидаемый red описания принят, а negative и су�
   const report = playwrightReport([
     failingDescriptionSpec(),
     passingSpec("не показывает заглушку без описания", "upcoming-events.spec.ts", [
-      "@controlled-red-negative",
+      "controlled-red-negative",
     ]),
     passingSpec("сохраняет группировку повестки"),
   ]);
@@ -83,7 +84,7 @@ test("посторонний assertion при зелёном основном о
     passingSpec("показывает описание типа события"),
     unrelated,
     passingSpec("не показывает заглушку без описания", "upcoming-events.spec.ts", [
-      "@controlled-red-negative",
+      "controlled-red-negative",
     ]),
   ]);
 
@@ -96,7 +97,7 @@ test("посторонний assertion при зелёном основном о
 test("красный negative при зелёном основном отклонён", () => {
   const negative = failingDescriptionSpec();
   negative.title = "не показывает заглушку без описания";
-  negative.tags = ["@controlled-red-negative"];
+  negative.tags = ["controlled-red-negative"];
   const report = playwrightReport([
     passingSpec("показывает описание типа события"),
     negative,
@@ -118,7 +119,7 @@ test("unexpected skipped отклонён даже при ожидаемом red
 });
 
 test("ошибка запуска Playwright отклоняется по structured report", () => {
-  const report = playwrightReport([failingDescriptionSpec(), passingSpec("negative", "upcoming-events.spec.ts", ["@controlled-red-negative"])]);
+  const report = playwrightReport([failingDescriptionSpec(), passingSpec("negative", "upcoming-events.spec.ts", ["controlled-red-negative"])]);
   report.errors.push({ message: "Error: web server did not start" });
 
   assert.throws(() => validateFrontendControlledRed(report, "event-description"), /ошибки запуска/);
@@ -129,7 +130,7 @@ test("timeout основного сценария не засчитываетс�
     "Test timeout of 30000ms exceeded.\nError: expect(locator).toContainText(expected) failed",
   );
   timedOut.tests[0].results[0].status = "timedOut";
-  const report = playwrightReport([timedOut, passingSpec("negative", "upcoming-events.spec.ts", ["@controlled-red-negative"])]);
+  const report = playwrightReport([timedOut, passingSpec("negative", "upcoming-events.spec.ts", ["controlled-red-negative"])]);
 
   assert.throws(() => validateFrontendControlledRed(report, "event-description"), /timeout/);
 });
@@ -140,7 +141,7 @@ test("Expected 201/Received 422 в setup основного сценария о�
       "Error: expect(received).toBe(expected)\n\nExpected: 201\nReceived: 422",
     ),
     passingSpec("не показывает заглушку без описания", "upcoming-events.spec.ts", [
-      "@controlled-red-negative",
+      "controlled-red-negative",
     ]),
   ]);
 
@@ -164,7 +165,7 @@ test("backend принимает AssertionError нового acceptance-тест
   };
 
   assert.doesNotThrow(() =>
-    validateBackendControlledRed(report, ["backend/tests/test_bookings.py"]),
+    validateBackendControlledRed(report, [{ className: "tests.test_bookings", name: "test_new_behavior" }]),
   );
 });
 
@@ -187,7 +188,7 @@ test("backend fixture/setup ERROR блокирует bypass даже при fail
   };
 
   assert.throws(
-    () => validateBackendControlledRed(report, ["backend/tests/test_bookings.py"]),
+    () => validateBackendControlledRed(report, [{ className: "tests.test_bookings", name: "test_new_behavior" }]),
     /fixture\/setup\/collection ERROR/,
   );
 });
@@ -205,7 +206,7 @@ test("backend collection ERROR блокирует bypass без failed assertion
   };
 
   assert.throws(
-    () => validateBackendControlledRed(report, ["backend/tests/test_bookings.py"]),
+    () => validateBackendControlledRed(report, [{ className: "tests.test_bookings", name: "test_new_behavior" }]),
     /fixture\/setup\/collection ERROR/,
   );
 });
@@ -235,7 +236,7 @@ test("JUnit XML сохраняет fixture/setup error как структурн
   assert.equal(report.tests[0].status, "error");
   assert.equal(report.tests[0].errorType, "RuntimeError");
   assert.throws(
-    () => validateBackendControlledRed(report, ["backend/tests/test_bookings.py"]),
+    () => validateBackendControlledRed(report, [{ className: "tests.test_bookings", name: "test_new_behavior" }]),
     /fixture\/setup\/collection ERROR/,
   );
 });
@@ -253,7 +254,7 @@ test("backend не относит failure похожего имени модул
   };
 
   assert.throws(
-    () => validateBackendControlledRed(report, ["backend/tests/test_bookings.py"]),
+    () => validateBackendControlledRed(report, [{ className: "tests.test_bookings", name: "test_new_behavior" }]),
     /изменённых тестах/,
   );
 });
@@ -270,6 +271,66 @@ test("JUnit XML распознаёт AssertionError из traceback без атр
   const report = readBackendControlledRedReport(reportPath);
   assert.equal(report.tests[0].failureType, "AssertionError");
   assert.doesNotThrow(() =>
-    validateBackendControlledRed(report, ["backend/tests/test_bookings.py"]),
+    validateBackendControlledRed(report, [
+      { className: "tests.test_bookings", name: "test_new" },
+    ]),
   );
+});
+
+test("backend отклоняет skipped negative при красном основном", () => {
+  const report = {
+    tests: [
+      {
+        className: "tests.test_bookings",
+        name: "test_new_behavior",
+        status: "failed",
+        failureType: "AssertionError",
+      },
+      { className: "tests.test_bookings", name: "test_negative", status: "skipped" },
+    ],
+  };
+
+  assert.throws(
+    () => validateBackendControlledRed(report, [{ className: "tests.test_bookings", name: "test_new_behavior" }]),
+    /skipped\/xfail/,
+  );
+});
+
+test("backend отклоняет старый failed при зелёном новом тесте в том же файле", () => {
+  const report = {
+    tests: [
+      {
+        className: "tests.test_bookings",
+        name: "test_existing",
+        status: "failed",
+        failureType: "AssertionError",
+      },
+      { className: "tests.test_bookings", name: "test_new_behavior", status: "passed" },
+    ],
+  };
+
+  assert.throws(
+    () => validateBackendControlledRed(report, [{ className: "tests.test_bookings", name: "test_new_behavior" }]),
+    /добавленных или изменённых тестах/,
+  );
+});
+
+test("AST сопоставление возвращает только добавленные или изменённые pytest-тесты", () => {
+  const changes = [
+    {
+      path: "backend/tests/test_bookings.py",
+      base: "def test_existing():\n    assert True\n",
+      current:
+        "def test_existing():\n    assert True\n\ndef test_new_behavior():\n    assert False\n",
+    },
+  ];
+
+  assert.deepEqual(readChangedBackendTests(changes), [
+    { className: "tests.test_bookings", name: "test_new_behavior" },
+  ]);
+
+  changes[0].current = "def test_existing():\n    assert False\n";
+  assert.deepEqual(readChangedBackendTests(changes), [
+    { className: "tests.test_bookings", name: "test_existing" },
+  ]);
 });
