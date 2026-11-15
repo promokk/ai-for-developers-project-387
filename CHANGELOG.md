@@ -2,11 +2,9 @@
 
 ## [0.7.0](https://github.com/promokk/ai-for-developers-project-387/compare/v0.6.2...v0.7.0) (2026-11-15)
 
-
 ### Features
 
 * **frontend:** показать описание события в предстоящих событиях ([667f48c](https://github.com/promokk/ai-for-developers-project-387/commit/667f48c3e1c7ceda48d43a95d9cb866bc7b7e678))
-
 
 ### Bug Fixes
 
