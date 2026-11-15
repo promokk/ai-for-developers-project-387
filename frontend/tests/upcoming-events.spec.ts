@@ -130,6 +130,7 @@ test.describe.serial("предстоящие события", () => {
     await expect(item).not.toContainText("undefined");
     await expect(item).not.toContainText("Описание отсутствует");
     await expect(item).not.toContainText("Без описания");
+    await expect(item.locator("p")).toHaveCount(0);
     await expect(page.getByRole("alert")).toHaveCount(0);
   });
 
