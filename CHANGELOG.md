@@ -2,7 +2,6 @@
 
 ## [0.6.2](https://github.com/promokk/ai-for-developers-project-387/compare/v0.6.1...v0.6.2) (2026-11-15)
 
-
 ### Bug Fixes
 
 * **ci:** разрешить публикацию controlled red тестов ([efa3bc8](https://github.com/promokk/ai-for-developers-project-387/commit/efa3bc8a42695ada9ea4f5eb9f4d8da13a1e491a))
