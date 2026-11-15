@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.7.0](https://github.com/promokk/ai-for-developers-project-387/compare/v0.6.2...v0.7.0) (2026-11-15)
+
+
+### Features
+
+* **frontend:** показать описание события в предстоящих событиях ([667f48c](https://github.com/promokk/ai-for-developers-project-387/commit/667f48c3e1c7ceda48d43a95d9cb866bc7b7e678))
+
+
+### Bug Fixes
+
+* **ci:** разрешить комментарии браузерной проверки PR ([50a62d4](https://github.com/promokk/ai-for-developers-project-387/commit/50a62d44bafc9c0a948ec115719ec2c4ccb5d107))
+
 ## [0.6.2](https://github.com/promokk/ai-for-developers-project-387/compare/v0.6.1...v0.6.2) (2026-11-15)
 
 ### Bug Fixes
