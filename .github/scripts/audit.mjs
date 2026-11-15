@@ -193,6 +193,9 @@ export function parseAuditResponse(raw, { trainingMode = false } = {}) {
     if (trainingMode && result.fingerprint !== TRAINING_FINGERPRINT) {
       throw new Error("Учебный duplicate требует стабильный учебный fingerprint");
     }
+    if (!trainingMode && result.fingerprint === TRAINING_FINGERPRINT) {
+      throw new Error("Учебный fingerprint запрещён в обычном режиме");
+    }
     return parsed;
   }
 

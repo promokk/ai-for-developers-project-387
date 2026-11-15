@@ -151,6 +151,18 @@ test("duplicate требует номер и fingerprint существующе�
   );
 });
 
+test("обычный duplicate отклоняет учебный fingerprint", () => {
+  assert.deepEqual(parseAuditResponse(JSON.stringify(duplicateAction())), duplicateAction());
+  assert.throws(
+    () =>
+      parseAuditResponse(
+        JSON.stringify(duplicateAction({ fingerprint: TRAINING_FINGERPRINT })),
+        { trainingMode: false },
+      ),
+    /запрещён в обычном режиме/,
+  );
+});
+
 test("учебный режим требует явные пометки и запрещает пропуск без дубля", () => {
   assert.deepEqual(
     parseAuditResponse(JSON.stringify(trainingAction()), { trainingMode: true }),

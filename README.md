@@ -289,10 +289,12 @@ gh workflow run audit.yml -f training_mode=true
 gh run list --workflow audit.yml
 ```
 
-Каждый прогон сохраняет artifact `calendar-audit-<run_id>` на 14 дней. В нём
-находятся `report.md`, JSON внешних проверок, вывод агента, результат создания
-issue и данные Playwright. Artifact доступен на странице прогона в разделе
-**Artifacts**; файлы не попадают в коммиты.
+Каждая попытка прогона сохраняет artifact
+`calendar-audit-<run_id>-attempt-<run_attempt>` на 14 дней. В нём находятся
+`report.md`, JSON внешних проверок, вывод агента, результат создания issue и
+данные Playwright. Повторная попытка того же run создаёт отдельный artifact.
+Файлы доступны на странице прогона в разделе **Artifacts** и не попадают в
+коммиты.
 
 Для приёмки после слияния workflow в `main` нужно дважды запустить его вручную с
 тем же режимом. Первый прогон должен сохранить отчёт и создать issue по находке,
