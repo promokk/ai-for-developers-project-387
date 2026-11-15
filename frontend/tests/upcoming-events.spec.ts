@@ -146,20 +146,28 @@ test.describe.serial("предстоящие события", () => {
 
     const current = items.nth(0);
     await expect(current).toContainText("Знакомство");
-    await expect(current).toContainText(
-      "Короткий звонок, чтобы познакомиться, обсудить задачу и определить следующие шаги",
-    );
+    await expect(
+      current.getByText(
+        "Короткий звонок, чтобы познакомиться, обсудить задачу и определить следующие шаги",
+        { exact: true },
+      ),
+    ).toBeVisible();
 
     const later = items.nth(1);
     await expect(later).toContainText("Глубокий разбор");
-    await expect(later).toContainText(
-      "Детальный разбор сложной задачи и составление конкретного плана действий",
-    );
+    await expect(
+      later.getByText("Детальный разбор сложной задачи и составление конкретного плана действий", {
+        exact: true,
+      }),
+    ).toBeVisible();
 
     const nextDay = items.nth(2);
     await expect(nextDay).toContainText("Консультация");
-    await expect(nextDay).toContainText(
-      "Подробное обсуждение вашего вопроса, разбор возможных решений и следующих шагов",
-    );
+    await expect(
+      nextDay.getByText(
+        "Подробное обсуждение вашего вопроса, разбор возможных решений и следующих шагов",
+        { exact: true },
+      ),
+    ).toBeVisible();
   });
 });
