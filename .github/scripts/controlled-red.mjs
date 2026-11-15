@@ -92,6 +92,20 @@ export function validateFrontendControlledRed(report, profile) {
   if (failed.length !== 1 || failed.length === specs.length) {
     throw new Error("Controlled red требует ровно один failed тест и зелёные остальные сценарии");
   }
+  const redEntries = failed[0].tests.filter((entry) => entry.status === "unexpected");
+  if (redEntries.length !== 1) {
+    throw new Error("Controlled red требует ровно один failed тест основного сценария");
+  }
+  for (const entry of entries) {
+    if (
+      entry !== redEntries[0] &&
+      (entry.expectedStatus !== "passed" ||
+        entry.status !== "expected" ||
+        entry.results[0].status !== "passed")
+    ) {
+      throw new Error("Controlled red требует фактический passed у всех остальных сценариев");
+    }
+  }
   if (!["event-description", "generic"].includes(profile)) {
     throw new Error(`Неизвестный controlled-red profile: ${profile}`);
   }
@@ -119,6 +133,13 @@ export function validateFrontendControlledRed(report, profile) {
     }
   } else {
     const message = failed[0].tests[0].results[0].error?.message ?? "";
+    const normalizedMessage = message.replaceAll(/\u001b\[[0-9;]*m/g, "");
+    const apiSetupFailure =
+      /Expected:\s*2\d\d[\s\S]*Received:\s*[45]\d\d/.test(normalizedMessage) ||
+      /START_OUTSIDE_BOOKING_WINDOW|INVALID_DATETIME|API\s+[45]\d\d/.test(normalizedMessage);
+    if (apiSetupFailure) {
+      throw new Error("Controlled red отклонён: setup/API validation failure основного сценария");
+    }
     if (!message.includes("expect")) {
       throw new Error("Controlled red требует assertion failure основного сценария");
     }

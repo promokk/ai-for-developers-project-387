@@ -334,3 +334,72 @@ test("AST сопоставление возвращает только доба�
     { className: "tests.test_bookings", name: "test_existing" },
   ]);
 });
+
+for (const scenario of ["negative", "соседний"]) {
+  test(`test.fail с фактическим failed у ${scenario} сценария отклонён`, () => {
+    const expectedFailure = passingSpec(scenario);
+    expectedFailure.tests[0].expectedStatus = "failed";
+    expectedFailure.tests[0].results[0].status = "failed";
+    if (scenario === "negative") {
+      expectedFailure.tags = ["controlled-red-negative"];
+    }
+    const negative =
+      scenario === "negative"
+        ? expectedFailure
+        : passingSpec("negative", "upcoming-events.spec.ts", ["controlled-red-negative"]);
+    const neighbor = scenario === "соседний" ? expectedFailure : passingSpec("соседний");
+    const report = playwrightReport([failingDescriptionSpec(), negative, neighbor]);
+
+    assert.throws(
+      () => validateFrontendControlledRed(report, "event-description"),
+      /фактический passed/,
+    );
+  });
+}
+
+function failingGenericSpec(message) {
+  const spec = failingDescriptionSpec(message);
+  spec.tags = ["controlled-red"];
+  return spec;
+}
+
+test("generic отклоняет Expected 201/Received 422 из setup helper", () => {
+  const report = playwrightReport([
+    failingGenericSpec(
+      "Error: \u001b[2mexpect(\u001b[22mreceived).toBe(expected)\n\nExpected: \u001b[32m201\u001b[39m\nReceived: \u001b[31m422\u001b[39m",
+    ),
+    passingSpec("соседний"),
+  ]);
+
+  assert.throws(
+    () => validateFrontendControlledRed(report, "generic"),
+    /setup\/API validation/,
+  );
+});
+
+test("generic принимает genuine target assertion без setup/API маркеров", () => {
+  const report = playwrightReport([
+    failingGenericSpec(
+      'Error: expect(locator).toHaveText(expected) failed\n\nExpected: "Новое поведение"\nReceived: "Текущее поведение"',
+    ),
+    passingSpec("соседний"),
+  ]);
+
+  assert.doesNotThrow(() => validateFrontendControlledRed(report, "generic"));
+});
+
+for (const message of [
+  "Error: expect(received).toBe(expected)\nExpected: 200\nReceived: 400",
+  "Error: expect(response.ok).toBe(true)\nAPI 422",
+  "Error: expect(response.status()).toBe(201)\nSTART_OUTSIDE_BOOKING_WINDOW",
+  "Error: expect(response.status()).toBe(201)\nINVALID_DATETIME",
+]) {
+  test("generic отклоняет API validation/setup маркеры", () => {
+    const report = playwrightReport([failingGenericSpec(message), passingSpec("соседний")]);
+
+    assert.throws(
+      () => validateFrontendControlledRed(report, "generic"),
+      /setup\/API validation/,
+    );
+  });
+}
