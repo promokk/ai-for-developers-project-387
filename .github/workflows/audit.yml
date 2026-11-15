@@ -1,0 +1,140 @@
+name: Calendar Audit
+
+on:
+  schedule:
+    - cron: "0 6 * * *"
+  workflow_dispatch:
+    inputs:
+      training_mode:
+        description: Использовать явно обозначенную учебную находку без проверки приложения
+        required: false
+        default: false
+        type: boolean
+
+permissions: {}
+
+concurrency:
+  group: calendar-audit
+  cancel-in-progress: false
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Validate configuration
+        shell: bash
+        env:
+          APP_URL: ${{ vars.APP_URL }}
+        run: |
+          if [[ ! "$APP_URL" =~ ^https:// ]]; then
+            echo "Set the APP_URL repository variable to an HTTPS application URL" >&2
+            exit 1
+          fi
+          mkdir -p "$RUNNER_TEMP/audit"
+
+      - name: Create GitHub App installation token
+        id: app-token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ vars.KIMI_APP_CLIENT_ID }}
+          private-key: ${{ secrets.KIMI_APP_PRIVATE_KEY }}
+          permission-contents: read
+          permission-issues: write
+
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Setup project tools
+        uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
+
+      - name: Install external test dependencies
+        run: mise run install:playwright
+
+      - name: Check Kimi Code CLI
+        run: mise exec -- pnpm exec kimi --version
+
+      - name: Run external HTTP and browser scenarios
+        id: external
+        if: inputs.training_mode != true
+        continue-on-error: true
+        shell: bash
+        env:
+          CALENDAR_BASE_URL: ${{ vars.APP_URL }}
+        run: |
+          mise exec -- pnpm --dir frontend exec playwright test \
+            --config playwright.external.config.ts --reporter=json \
+            > "$RUNNER_TEMP/audit/external-results.json"
+
+      - name: Read existing open and closed issues
+        shell: bash
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          gh api --paginate --slurp \
+            "repos/${GITHUB_REPOSITORY}/issues?state=all&per_page=100" \
+            > "$RUNNER_TEMP/audit/existing-issues.json"
+
+      - name: Build audit prompt
+        id: prompt
+        env:
+          APP_URL: ${{ vars.APP_URL }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          TRAINING_MODE: ${{ inputs.training_mode }}
+        run: node .github/scripts/audit.mjs prompt
+
+      - name: Run Kimi Code audit
+        id: agent
+        shell: bash
+        env:
+          KIMI_CODE_HOME: ${{ runner.temp }}/kimi-code-home
+          KIMI_CODE_NO_AUTO_UPDATE: "1"
+          KIMI_DISABLE_TELEMETRY: "1"
+          KIMI_MODEL_API_KEY: ${{ secrets.KIMI_API_KEY }}
+          KIMI_MODEL_BASE_URL: https://api.kimi.com/coding/v1
+          KIMI_MODEL_NAME: k3.1-pro
+        run: |
+          mise exec -- pnpm exec kimi --agent-file .kimi-code/agents/github-audit.md \
+            --prompt "$(cat "$RUNNER_TEMP/audit/agent-prompt.txt")" \
+            > "$RUNNER_TEMP/audit/agent-response.json"
+          if [[ ! -s "$RUNNER_TEMP/audit/agent-response.json" ]]; then
+            echo "Kimi Code returned an empty response" >&2
+            exit 1
+          fi
+
+      - name: Validate finding and create at most one issue
+        id: apply
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: node .github/scripts/audit.mjs apply
+
+      - name: Build audit report
+        if: always()
+        env:
+          AGENT_OUTCOME: ${{ steps.agent.outcome || 'not-run' }}
+          APPLY_OUTCOME: ${{ steps.apply.outcome || 'not-run' }}
+          APP_URL: ${{ vars.APP_URL }}
+          EXTERNAL_OUTCOME: ${{ steps.external.outcome || 'not-run' }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          TRAINING_MODE: ${{ inputs.training_mode }}
+        run: node .github/scripts/audit.mjs report
+
+      - name: Upload report, external results and agent output
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: calendar-audit-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/audit/report.md
+            ${{ runner.temp }}/audit/external-results.json
+            ${{ runner.temp }}/audit/agent-response.json
+            ${{ runner.temp }}/audit/audit-result.json
+            frontend/test-results/
+          retention-days: 14
+          if-no-files-found: error
