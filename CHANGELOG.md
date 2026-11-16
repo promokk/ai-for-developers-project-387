@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.8.0](https://github.com/promokk/ai-for-developers-project-387/compare/v0.7.0...v0.8.0) (2026-11-16)
+
+### Features
+
+* **ci:** добавить ежедневный аудит приложения ([#28](https://github.com/promokk/ai-for-developers-project-387/issues/28)) ([fa16ade](https://github.com/promokk/ai-for-developers-project-387/commit/fa16adea9aa516eb8ebdcc61623e9cab8cb63136))
+
 ## [0.7.0](https://github.com/promokk/ai-for-developers-project-387/compare/v0.6.2...v0.7.0) (2026-11-15)
 
 ### Features
