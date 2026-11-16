@@ -304,8 +304,16 @@ gh run list --workflow audit.yml
 
 ##### Результаты ручной проверки
 
-Ссылки на успешный прогон, artifact, созданный issue и повторный прогон без дублей
-будут добавлены после выполнения описанных выше ручных запусков из `main`.
+16 ноября 2026 года workflow проверен из `main` на коммите `411598648b9304b31f4d4c4a1a10d46de5e8f6c9`:
+
+- [Первый обычный прогон](https://github.com/promokk/ai-for-developers-project-387/actions/runs/43940668244) успешно выполнил внешние проверки, вызвал агента и создал [#30](https://github.com/promokk/ai-for-developers-project-387/issues/30) с fingerprint `code.frontend-src-booking-usebookingsubmission-usebookingsubmission-conflict-key`. Сохранён [отчёт и вывод агента](https://github.com/promokk/ai-for-developers-project-387/actions/runs/43940668244/artifacts/14261839742).
+- [Второй обычный прогон](https://github.com/promokk/ai-for-developers-project-387/actions/runs/43941382577) также успешен и создал другую находку [#31](https://github.com/promokk/ai-for-developers-project-387/issues/31) с fingerprint `code.frontend-src-styles-css-agenda-item-mobile-overflow`, а не дубликат #30. Его [artifact](https://github.com/promokk/ai-for-developers-project-387/actions/runs/43941382577/artifacts/14261664916) содержит отдельный отчёт и вывод.
+- [Учебный прогон](https://github.com/promokk/ai-for-developers-project-387/actions/runs/43943205184) пропустил внешние проверки и создал явно помеченную [#32](https://github.com/promokk/ai-for-developers-project-387/issues/32) с fingerprint `training.api-health-unavailable`. Результат сохранён в [artifact](https://github.com/promokk/ai-for-developers-project-387/actions/runs/43943205184/artifacts/14263496955).
+- [Повторный учебный прогон](https://github.com/promokk/ai-for-developers-project-387/actions/runs/43943564054) вернул `status: duplicate`, сослался на #32 и не создал новый issue. Это подтверждено его [отчётом, ответом агента и `audit-result.json`](https://github.com/promokk/ai-for-developers-project-387/actions/runs/43943564054/artifacts/14265170367).
+
+Второй обычный прогон выбрал новую находку, поэтому контроль повторения той же
+задачи выполнен на фиксированном учебном fingerprint. Отчёты хранятся только в
+Actions Artifacts и не добавляются в коммиты.
 
 #### Настройка GitHub App
 
