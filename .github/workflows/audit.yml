@@ -1,8 +1,10 @@
 name: Calendar Audit
 
 on:
-  schedule:
-    - cron: "0 6 * * *"
+  # Cron 0 6 * * * означает «ежедневно в 06:00 UTC (09:00 по Москве)».
+  # Запуск по этому расписанию отключён; ручной аудит остаётся доступен.
+  # schedule:
+  #   - cron: "0 6 * * *"
   workflow_dispatch:
     inputs:
       training_mode:
